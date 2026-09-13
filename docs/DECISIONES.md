@@ -385,7 +385,24 @@ sale un **0,58 % bajo**. Afecta a Wind Speed, Wind Gust y Max Daily Gust. El
 paréntesis correcto es `{{ (mph | float * 1.60934) | round(1) }}`.
 
 Impacto en ET₀: despreciable (el término aerodinámico es una fracción
-pequeña del total). Queda anotado, pendiente de decidir si se corrige.
+pequeña del total).
+
+**Corregido el 13/09/2026** a petición del usuario, directamente sobre el HA
+en producción. Como el fichero está en un subdirectorio, el backup
+automático de la herramienta **no lo cubre** (solo respalda los YAML de
+primer nivel), así que antes de escribir se reconstruyó el original en local
+y se validó comparando el conjunto de `unique_id` del fichero contra las
+entidades vivas de HA: coincidencia exacta, sin sobras ni faltas. El diff
+aplicado fue de exactamente tres líneas.
+
+Verificación posterior a `template.reload`: 35 entidades antes y después,
+ninguna en `unavailable` ni `unknown`, y las tres de viento pasando a
+2,91 mph → 4,7 km/h (antes 4,656), 5,82 → 9,4 y 13,65 → 22,0. El resto de
+sensores del paquete, sin cambios.
+
+Efecto secundario buscado: ahora el `round(1)` sí se aplica, así que las tres
+entidades publican un decimal en lugar de la ristra de decimales que salía
+del producto sin redondear.
 
 
 ### 7.2 `Value 126.7 is too large` y el factor del piranómetro desaparecido (v0.2.0)
