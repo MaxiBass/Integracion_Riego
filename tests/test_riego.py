@@ -513,13 +513,26 @@ def test_coordinador() -> None:
 
     # 8. No se programa un segundo ciclo para el mismo amanecer
     c, hass = construir()
-    c._estado["ultimo_ciclo"] = datetime(2026, 9, 14, 4, 30, tzinfo=timezone.utc).isoformat()
+    c._estado["ultimo_ciclo_programado"] = datetime(2026, 9, 14, 4, 30, tzinfo=timezone.utc).isoformat()
     with patch.object(mod, "get_astral_event_next", return_value=amanecer), \
          patch.object(mod, "async_track_point_in_utc_time") as track, \
          patch.object(mod.dt_util, "utcnow",
                       return_value=datetime(2026, 9, 14, 4, 35, tzinfo=timezone.utc)):
         c._planificar()
     comprobar(c._proximo is None, "tras regar no se reprograma otro ciclo para el mismo amanecer")
+
+    # 8b. Un ciclo lanzado a mano NO marca el amanecer como cumplido
+    c, hass = construir()
+    c._estado["et0_acumulada"] = 3.10
+    with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
+        asyncio.run(c.ejecutar_ciclo())          # manual: programado=False
+    with patch.object(mod, "get_astral_event_next", return_value=amanecer), \
+         patch.object(mod, "async_track_point_in_utc_time"), \
+         patch.object(mod.dt_util, "utcnow",
+                      return_value=datetime(2026, 9, 13, 20, 0, tzinfo=timezone.utc)):
+        c._planificar()
+    comprobar(c._proximo is not None,
+              "un ciclo manual no cancela el ciclo programado del amanecer")
 
     # 9. Volumen 0 si la zona está deshabilitada o no llega al umbral
     c, hass = construir()
