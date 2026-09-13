@@ -443,13 +443,30 @@ ninguna integración. Comprobado en su HA: **no existía ninguna entrada de
 configuración de `riego`**, y no había ni un solo error de la integración en
 el log. Es decir, el flujo no falló: nunca llegó a `async_create_entry`.
 
-La causa era de diseño, no de código. El último paso era un formulario con
-una sola casilla desmarcada, «Añadir otra zona». Visualmente parece una
-pantalla sin nada que hacer, así que es natural cerrar el diálogo en lugar
-de pulsar «Enviar» — y es justo ese «Enviar» el que creaba la entrada.
+La primera hipótesis —que el usuario hubiera cerrado el diálogo sin pulsar
+«Enviar»— **era falsa**. Él confirmó que sí pulsaba Enviar y que no ocurría
+nada. La causa real:
 
-Sustituido por un menú de dos opciones explícitas: «➕ Añadir otra zona» y
-«✅ Terminar y crear la integración».
+`vol.Required("añadir_otra", default=False)` con un `bool` crudo se
+serializa como `{"type": "boolean", "required": true}`. Cuando la casilla
+está **marcada**, `ha-form` la da por rellena y el envío funciona — por eso
+sí se podían encadenar zonas. Cuando se **desmarca**, el valor `false` se
+interpreta como campo obligatorio sin rellenar y el envío queda **bloqueado
+sin mostrar ningún error**: se pulsa Enviar y no pasa nada.
+
+Es decir, el único camino que creaba la integración era justo el único que
+el formulario impedía recorrer.
+
+Sustituido por un menú de dos opciones explícitas —«➕ Añadir otra zona» y
+«✅ Terminar y crear la integración»—, que no tiene campos y por tanto no
+puede quedar bloqueado.
+
+**La misma trampa estaba en un segundo sitio**: `simulacion`, en el paso de
+planificación del ciclo, también era un booleano obligatorio. Arrancando en
+`true` no daba problema, pero habría bloqueado el envío justo al intentar
+desmarcarlo en Opciones → Ciclo, que es precisamente el gesto de pasar de
+simulación a riego real. Cambiado a `vol.Optional`, y añadida una prueba que
+prohíbe booleanos obligatorios en cualquier esquema.
 
 Por qué las pruebas no lo detectaron: el recorrido del flujo sustituía
 `async_create_entry` por un doble, así que verificaba los datos que se le
