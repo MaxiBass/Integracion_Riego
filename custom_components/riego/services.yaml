@@ -1,0 +1,78 @@
+ejecutar_ciclo:
+  name: Ejecutar ciclo
+  description: >-
+    Lanza el ciclo de balance hídrico ahora mismo: aplica la ET₀ acumulada al
+    déficit de cada zona, comprueba helada y previsión de lluvia y riega las
+    zonas que superen su umbral. Devuelve el detalle de lo hecho.
+  fields:
+    simulacion:
+      name: Forzar simulación
+      description: >-
+        Si se indica, ignora el interruptor global de simulación para esta
+        ejecución concreta. En true calcula todo pero no envía nada a las
+        válvulas.
+      required: false
+      selector:
+        boolean:
+
+regar_zona:
+  name: Regar zona
+  description: >-
+    Envía una dosis concreta a una zona, al margen del balance hídrico. No
+    descuenta del déficit.
+  fields:
+    zona:
+      name: Zona
+      description: Identificador o nombre de la zona.
+      required: true
+      example: frutales
+      selector:
+        text:
+    litros:
+      name: Litros
+      required: true
+      example: 150
+      selector:
+        number:
+          min: 1
+          max: 5000
+          unit_of_measurement: L
+
+ajustar_deficit:
+  name: Ajustar déficit
+  description: >-
+    Fija o corrige el déficit hídrico acumulado de una zona. Útil al migrar
+    desde otro sistema o tras regar a mano.
+  fields:
+    zona:
+      name: Zona
+      required: true
+      example: frutales
+      selector:
+        text:
+    valor:
+      name: Valor (mm)
+      required: true
+      example: 2.5
+      selector:
+        number:
+          min: -50
+          max: 50
+          step: 0.01
+          unit_of_measurement: mm
+    relativo:
+      name: Relativo
+      description: Si es true, suma al déficit actual en lugar de sustituirlo.
+      required: false
+      selector:
+        boolean:
+
+saltar_dia:
+  name: Saltar el próximo ciclo
+  description: >-
+    Marca el sistema como aplazado, de modo que el próximo ciclo solo acumule
+    déficit sin regar. Se limpia solo en el ciclo siguiente.
+
+reiniciar_temporada:
+  name: Reiniciar contadores de temporada
+  description: Pone a cero los litros acumulados de temporada de todas las zonas.

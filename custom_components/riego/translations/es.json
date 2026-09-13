@@ -1,0 +1,240 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sensores meteorológicos",
+        "description": "Entradas del cálculo de ET₀ (Penman-Monteith FAO-56 horaria). Temperatura, humedad y radiación son obligatorias; sin viento ni presión el cálculo sigue funcionando con valores por defecto, pero pierde precisión.",
+        "data": {
+          "sensor_temperatura": "Temperatura exterior (°C)",
+          "sensor_humedad": "Humedad relativa (%)",
+          "sensor_radiacion": "Radiación solar (W/m²)",
+          "sensor_viento": "Velocidad del viento",
+          "sensor_presion": "Presión atmosférica (hPa o kPa)",
+          "sensor_lluvia_24h": "Lluvia acumulada 24 h (mm)",
+          "altura_anemometro": "Altura del anemómetro",
+          "viento_minimo": "Viento mínimo para el cálculo",
+          "factor_radiacion": "Factor de calibración del piranómetro"
+        },
+        "data_description": {
+          "altura_anemometro": "Se usa para convertir la velocidad medida a la de 2 m que exige FAO-56.",
+          "viento_minimo": "FAO-56 recomienda 0,5 m/s para que el término aerodinámico no se desplome con viento muy flojo. 0 desactiva el suelo mínimo.",
+          "factor_radiacion": "Multiplica la lectura del sensor. Bájalo si tu estación supera el máximo teórico de cielo despejado (típico en sensores que derivan W/m² de un lux-metro)."
+        }
+      },
+      "prevision": {
+        "title": "Previsión de lluvia y protecciones",
+        "description": "La fuente de previsión es intercambiable: sirve cualquier entidad del dominio weather que ofrezca precipitación.",
+        "data": {
+          "weather_entity": "Entidad de previsión meteorológica",
+          "forecast_tipo": "Tipo de previsión",
+          "forecast_horas": "Horizonte a considerar",
+          "lluvia_prevista_umbral": "Lluvia prevista que aplaza el riego",
+          "lluvia_minima": "Lluvia mínima efectiva",
+          "lluvia_cap": "Lluvia efectiva máxima por ciclo",
+          "temp_helada": "Temperatura por debajo de la cual no se riega"
+        },
+        "data_description": {
+          "lluvia_minima": "Por debajo de este valor la lluvia no se descuenta del déficit: no llega a la zona radicular.",
+          "lluvia_cap": "Tope de lluvia descontable en un ciclo, para que un chaparrón no ponga el déficit a cero varios días."
+        }
+      },
+      "ciclo": {
+        "title": "Planificación del ciclo",
+        "description": "En modo «terminar al amanecer» la integración estima la duración con el caudal medido de cada zona y calcula la hora de arranque, de modo que el suelo quede recargado justo cuando la planta empieza a transpirar.",
+        "data": {
+          "modo_inicio": "Cómo se fija la hora de inicio",
+          "offset_amanecer_min": "Desfase respecto al amanecer",
+          "hora_fija_valor": "Hora fija de inicio",
+          "hora_minima": "No arrancar antes de",
+          "margen_duracion": "Margen de seguridad sobre la duración estimada",
+          "desfase_zonas": "Desfase entre zonas",
+          "deficit_maximo": "Déficit máximo acumulable",
+          "simulacion": "Empezar en modo simulación",
+          "notify_entity": "Entidad de notificación"
+        },
+        "data_description": {
+          "simulacion": "Muy recomendable al instalar: se calcula todo y se avisa de lo que se habría regado, pero no se envía nada a las válvulas.",
+          "desfase_zonas": "Tiempo entre la apertura de una zona y la siguiente. No se espera a que la anterior termine: la válvula ejecuta la dosis de forma autónoma."
+        }
+      },
+      "zona": {
+        "title": "Zona de riego",
+        "description": "Define la primera zona. Después podrás añadir más desde las opciones de la integración.",
+        "data": {
+          "nombre": "Nombre de la zona",
+          "m2": "Superficie",
+          "umbral": "Umbral de riego",
+          "techo": "Techo de seguridad",
+          "factor": "Coeficiente de ajuste",
+          "kc": "Kc mensual (12 valores separados por comas)",
+          "topic": "Topic MQTT de la electroválvula",
+          "caudal_defecto": "Caudal estimado inicial",
+          "sensor_estado": "Sensor de estado de la válvula",
+          "sensor_caudal": "Sensor de caudal",
+          "sensor_volumen_real": "Sensor de volumen del riego en curso",
+          "sensor_duracion_real": "Sensor de duración del riego en curso"
+        },
+        "data_description": {
+          "umbral": "Milímetros de déficit que disparan el riego. En goteo lo habitual y correcto es un valor bajo (riego diario, dosis pequeña).",
+          "techo": "Límite absoluto por ciclo. Debe quedar POR ENCIMA del máximo legítimo en el pico de verano; si recorta de forma habitual está racionando, no protegiendo.",
+          "factor": "Multiplica a ETc antes de pasar a litros. Sirve para riego localizado (solo se moja parte del suelo) y para riego deficitario controlado. 1,0 = dosis FAO-56 íntegra.",
+          "topic": "Por ejemplo zigbee2mqtt/Riego Frutales/set",
+          "sensor_estado": "Si reporta fuga o falta de agua, la zona no riega y conserva su déficit.",
+          "sensor_volumen_real": "Junto con la duración permite aprender el caudal real de la zona y afinar la hora de arranque."
+        }
+      },
+      "otra": {
+        "title": "¿Añadir otra zona?",
+        "description": "Zonas definidas hasta ahora: {zonas}",
+        "data": {
+          "añadir_otra": "Añadir otra zona"
+        }
+      }
+    },
+    "error": {
+      "kc_invalido": "Introduce exactamente 12 valores de Kc entre 0 y 3, separados por comas.",
+      "nombre_requerido": "La zona necesita un nombre.",
+      "topic_requerido": "La zona necesita un topic MQTT.",
+      "zona_duplicada": "Ya existe una zona con ese nombre."
+    },
+    "abort": {
+      "single_instance_allowed": "Solo se admite una instancia de Riego; añade más zonas desde sus opciones."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configuración de Riego",
+        "menu_options": {
+          "meteo": "Sensores meteorológicos",
+          "prevision": "Previsión de lluvia y protecciones",
+          "ciclo": "Planificación del ciclo",
+          "zonas": "Zonas"
+        }
+      },
+      "meteo": {
+        "title": "Sensores meteorológicos",
+        "data": {
+          "sensor_temperatura": "Temperatura exterior (°C)",
+          "sensor_humedad": "Humedad relativa (%)",
+          "sensor_radiacion": "Radiación solar (W/m²)",
+          "sensor_viento": "Velocidad del viento",
+          "sensor_presion": "Presión atmosférica",
+          "sensor_lluvia_24h": "Lluvia acumulada 24 h (mm)",
+          "altura_anemometro": "Altura del anemómetro",
+          "viento_minimo": "Viento mínimo para el cálculo",
+          "factor_radiacion": "Factor de calibración del piranómetro"
+        }
+      },
+      "prevision": {
+        "title": "Previsión de lluvia y protecciones",
+        "data": {
+          "weather_entity": "Entidad de previsión meteorológica",
+          "forecast_tipo": "Tipo de previsión",
+          "forecast_horas": "Horizonte a considerar",
+          "lluvia_prevista_umbral": "Lluvia prevista que aplaza el riego",
+          "lluvia_minima": "Lluvia mínima efectiva",
+          "lluvia_cap": "Lluvia efectiva máxima por ciclo",
+          "temp_helada": "Temperatura por debajo de la cual no se riega"
+        }
+      },
+      "ciclo": {
+        "title": "Planificación del ciclo",
+        "data": {
+          "modo_inicio": "Cómo se fija la hora de inicio",
+          "offset_amanecer_min": "Desfase respecto al amanecer",
+          "hora_fija_valor": "Hora fija de inicio",
+          "hora_minima": "No arrancar antes de",
+          "margen_duracion": "Margen de seguridad sobre la duración estimada",
+          "desfase_zonas": "Desfase entre zonas",
+          "deficit_maximo": "Déficit máximo acumulable",
+          "simulacion": "Modo simulación",
+          "notify_entity": "Entidad de notificación"
+        }
+      },
+      "zonas": {
+        "title": "Zonas",
+        "description": "Elige una zona para editarla o añade una nueva.",
+        "data": {
+          "zona": "Zona"
+        }
+      },
+      "editar_zona": {
+        "title": "Editar zona",
+        "data": {
+          "nombre": "Nombre de la zona",
+          "m2": "Superficie",
+          "umbral": "Umbral de riego",
+          "techo": "Techo de seguridad",
+          "factor": "Coeficiente de ajuste",
+          "kc": "Kc mensual (12 valores separados por comas)",
+          "topic": "Topic MQTT de la electroválvula",
+          "caudal_defecto": "Caudal estimado inicial",
+          "sensor_estado": "Sensor de estado de la válvula",
+          "sensor_caudal": "Sensor de caudal",
+          "sensor_volumen_real": "Sensor de volumen del riego en curso",
+          "sensor_duracion_real": "Sensor de duración del riego en curso",
+          "eliminar": "Eliminar esta zona"
+        }
+      }
+    },
+    "error": {
+      "kc_invalido": "Introduce exactamente 12 valores de Kc entre 0 y 3, separados por comas.",
+      "nombre_requerido": "La zona necesita un nombre.",
+      "topic_requerido": "La zona necesita un topic MQTT.",
+      "zona_duplicada": "Ya existe una zona con ese nombre."
+    }
+  },
+  "selector": {
+    "forecast_tipo": {
+      "options": {
+        "hourly": "Horaria",
+        "daily": "Diaria"
+      }
+    },
+    "modo_inicio": {
+      "options": {
+        "fin_amanecer": "Terminar al amanecer (recomendado)",
+        "offset_amanecer": "Desfase fijo respecto al amanecer",
+        "hora_fija": "Hora fija"
+      }
+    }
+  },
+  "services": {
+    "ejecutar_ciclo": {
+      "name": "Ejecutar ciclo",
+      "description": "Lanza el ciclo de balance hídrico ahora mismo.",
+      "fields": {
+        "simulacion": {
+          "name": "Forzar simulación",
+          "description": "Ignora el interruptor global solo para esta ejecución."
+        }
+      }
+    },
+    "regar_zona": {
+      "name": "Regar zona",
+      "description": "Envía una dosis concreta a una zona, al margen del balance hídrico.",
+      "fields": {
+        "zona": {"name": "Zona", "description": "Identificador o nombre de la zona."},
+        "litros": {"name": "Litros", "description": "Volumen a enviar."}
+      }
+    },
+    "ajustar_deficit": {
+      "name": "Ajustar déficit",
+      "description": "Fija o corrige el déficit hídrico acumulado de una zona.",
+      "fields": {
+        "zona": {"name": "Zona", "description": "Identificador o nombre de la zona."},
+        "valor": {"name": "Valor (mm)", "description": "Déficit a fijar, o incremento si es relativo."},
+        "relativo": {"name": "Relativo", "description": "Sumar al déficit actual en lugar de sustituirlo."}
+      }
+    },
+    "saltar_dia": {
+      "name": "Saltar el próximo ciclo",
+      "description": "El próximo ciclo solo acumulará déficit, sin regar."
+    },
+    "reiniciar_temporada": {
+      "name": "Reiniciar contadores de temporada",
+      "description": "Pone a cero los litros acumulados de temporada."
+    }
+  }
+}

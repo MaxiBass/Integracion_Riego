@@ -1,0 +1,134 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Weather sensors",
+        "description": "Inputs for the hourly FAO-56 Penman-Monteith ET₀ calculation. Temperature, humidity and solar radiation are required; without wind and pressure the calculation still runs on defaults but loses accuracy.",
+        "data": {
+          "sensor_temperatura": "Outdoor temperature (°C)",
+          "sensor_humedad": "Relative humidity (%)",
+          "sensor_radiacion": "Solar radiation (W/m²)",
+          "sensor_viento": "Wind speed",
+          "sensor_presion": "Atmospheric pressure (hPa or kPa)",
+          "sensor_lluvia_24h": "24 h rainfall (mm)",
+          "altura_anemometro": "Anemometer height",
+          "viento_minimo": "Minimum wind speed for the calculation",
+          "factor_radiacion": "Pyranometer calibration factor"
+        },
+        "data_description": {
+          "altura_anemometro": "Used to convert the measured speed to the 2 m value FAO-56 requires.",
+          "viento_minimo": "FAO-56 suggests 0.5 m/s so the aerodynamic term does not collapse in very calm conditions. 0 disables the floor.",
+          "factor_radiacion": "Multiplies the sensor reading. Lower it if your station exceeds the theoretical clear-sky maximum, common in sensors deriving W/m² from a lux meter."
+        }
+      },
+      "prevision": {
+        "title": "Rain forecast and protections",
+        "description": "The forecast source is interchangeable: any weather entity exposing precipitation will do.",
+        "data": {
+          "weather_entity": "Weather forecast entity",
+          "forecast_tipo": "Forecast type",
+          "forecast_horas": "Horizon to consider",
+          "lluvia_prevista_umbral": "Forecast rain that defers irrigation",
+          "lluvia_minima": "Minimum effective rainfall",
+          "lluvia_cap": "Maximum effective rainfall per cycle",
+          "temp_helada": "Temperature below which irrigation is skipped"
+        }
+      },
+      "ciclo": {
+        "title": "Cycle planning",
+        "description": "In \"finish at sunrise\" mode the integration estimates the duration from each zone's measured flow and works backwards to the start time, so the soil is recharged exactly when the plant starts transpiring.",
+        "data": {
+          "modo_inicio": "How the start time is decided",
+          "offset_amanecer_min": "Offset from sunrise",
+          "hora_fija_valor": "Fixed start time",
+          "hora_minima": "Do not start before",
+          "margen_duracion": "Safety margin over the estimated duration",
+          "desfase_zonas": "Stagger between zones",
+          "deficit_maximo": "Maximum accumulated deficit",
+          "simulacion": "Start in simulation mode",
+          "notify_entity": "Notification entity"
+        },
+        "data_description": {
+          "simulacion": "Strongly recommended on install: everything is computed and reported, but nothing is sent to the valves."
+        }
+      },
+      "zona": {
+        "title": "Irrigation zone",
+        "description": "Define the first zone. You can add more later from the integration options.",
+        "data": {
+          "nombre": "Zone name",
+          "m2": "Area",
+          "umbral": "Irrigation threshold",
+          "techo": "Safety cap",
+          "factor": "Adjustment coefficient",
+          "kc": "Monthly Kc (12 comma-separated values)",
+          "topic": "Valve MQTT topic",
+          "caudal_defecto": "Initial flow estimate",
+          "sensor_estado": "Valve status sensor",
+          "sensor_caudal": "Flow sensor",
+          "sensor_volumen_real": "Current irrigation volume sensor",
+          "sensor_duracion_real": "Current irrigation duration sensor"
+        },
+        "data_description": {
+          "techo": "Absolute per-cycle limit. It must sit ABOVE the legitimate summer peak; if it clips routinely it is rationing, not protecting.",
+          "factor": "Multiplies ETc before converting to litres. For localized irrigation and controlled deficit irrigation. 1.0 = full FAO-56 dose."
+        }
+      },
+      "otra": {
+        "title": "Add another zone?",
+        "description": "Zones defined so far: {zonas}",
+        "data": {"añadir_otra": "Add another zone"}
+      }
+    },
+    "error": {
+      "kc_invalido": "Enter exactly 12 Kc values between 0 and 3, comma separated.",
+      "nombre_requerido": "The zone needs a name.",
+      "topic_requerido": "The zone needs an MQTT topic.",
+      "zona_duplicada": "A zone with that name already exists."
+    },
+    "abort": {
+      "single_instance_allowed": "Only one Riego instance is supported; add more zones from its options."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Riego configuration",
+        "menu_options": {
+          "meteo": "Weather sensors",
+          "prevision": "Rain forecast and protections",
+          "ciclo": "Cycle planning",
+          "zonas": "Zones"
+        }
+      },
+      "meteo": {"title": "Weather sensors"},
+      "prevision": {"title": "Rain forecast and protections"},
+      "ciclo": {"title": "Cycle planning"},
+      "zonas": {"title": "Zones", "description": "Pick a zone to edit, or add a new one.", "data": {"zona": "Zone"}},
+      "editar_zona": {"title": "Edit zone", "data": {"eliminar": "Delete this zone"}}
+    },
+    "error": {
+      "kc_invalido": "Enter exactly 12 Kc values between 0 and 3, comma separated.",
+      "nombre_requerido": "The zone needs a name.",
+      "topic_requerido": "The zone needs an MQTT topic.",
+      "zona_duplicada": "A zone with that name already exists."
+    }
+  },
+  "selector": {
+    "forecast_tipo": {"options": {"hourly": "Hourly", "daily": "Daily"}},
+    "modo_inicio": {
+      "options": {
+        "fin_amanecer": "Finish at sunrise (recommended)",
+        "offset_amanecer": "Fixed offset from sunrise",
+        "hora_fija": "Fixed time"
+      }
+    }
+  },
+  "services": {
+    "ejecutar_ciclo": {"name": "Run cycle", "description": "Runs the water-balance cycle right now.", "fields": {"simulacion": {"name": "Force simulation", "description": "Overrides the global switch for this run only."}}},
+    "regar_zona": {"name": "Water zone", "description": "Sends a specific dose to a zone, bypassing the water balance.", "fields": {"zona": {"name": "Zone", "description": "Zone id or name."}, "litros": {"name": "Litres", "description": "Volume to send."}}},
+    "ajustar_deficit": {"name": "Adjust deficit", "description": "Sets or corrects a zone's accumulated water deficit.", "fields": {"zona": {"name": "Zone", "description": "Zone id or name."}, "valor": {"name": "Value (mm)", "description": "Deficit to set, or increment if relative."}, "relativo": {"name": "Relative", "description": "Add to the current deficit instead of replacing it."}}},
+    "saltar_dia": {"name": "Skip next cycle", "description": "The next cycle will only accumulate deficit, without watering."},
+    "reiniciar_temporada": {"name": "Reset season counters", "description": "Zeroes the accumulated season litres."}
+  }
+}
