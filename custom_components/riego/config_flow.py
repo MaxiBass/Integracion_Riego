@@ -145,8 +145,7 @@ def esquema_meteo(valores: dict[str, Any]) -> vol.Schema:
                 default=valores.get(CONF_VIENTO_MINIMO, DEFECTO_VIENTO_MINIMO),
             ): _numero(0, 2, 0.1, "m/s"),
             vol.Required(
-                CONF_FACTOR_LUX,
-    CONF_FACTOR_RADIACION,
+                CONF_FACTOR_RADIACION,
                 default=valores.get(CONF_FACTOR_RADIACION, DEFECTO_FACTOR_RADIACION),
             ): _numero(0.5, 1.5, 0.01),
         }

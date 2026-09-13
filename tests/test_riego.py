@@ -161,6 +161,32 @@ def test_config_flow() -> None:
         json.dumps(campos)  # es lo que HA envía al frontend
         comprobar(len(campos) > 0, f"{etiqueta}: {len(campos)} campos serializan a JSON")
 
+    # El formulario debe tener EXACTAMENTE estos campos, y los numéricos sus
+    # límites correctos. Un descuido editando el esquema dejó una vez el campo
+    # "luxes por W/m²" con los límites del factor del piranómetro (0.5-1.5),
+    # de modo que el valor por defecto 126.7 se rechazaba por «too large».
+    from custom_components.riego.config_flow import esquema_meteo
+    from custom_components.riego.const import DEFECTO_FACTOR_LUX, DEFECTO_FACTOR_RADIACION
+
+    campos = {c["name"]: c for c in to_field_list(esquema_meteo({}),
+                                                  custom_serializer=cv.custom_serializer)}
+    esperados = {"sensor_temperatura", "sensor_humedad", "sensor_radiacion",
+                 "sensor_iluminancia", "factor_lux", "sensor_viento", "sensor_presion",
+                 "sensor_lluvia_24h", "altura_anemometro", "viento_minimo",
+                 "factor_radiacion"}
+    comprobar(set(campos) == esperados,
+              f"el paso de meteorología tiene los 11 campos esperados (faltan: "
+              f"{esperados - set(campos)}, sobran: {set(campos) - esperados})")
+
+    for nombre, defecto in (("factor_lux", DEFECTO_FACTOR_LUX),
+                            ("factor_radiacion", DEFECTO_FACTOR_RADIACION),
+                            ("altura_anemometro", 7.0), ("viento_minimo", 0.0)):
+        num = campos.get(nombre, {}).get("selector", {}).get("number", {})
+        dentro = num and num["min"] <= defecto <= num["max"]
+        comprobar(bool(dentro),
+                  f"{nombre}: el valor por defecto {defecto} cabe en "
+                  f"[{num.get('min')}, {num.get('max')}]")
+
     meteo = {"sensor_temperatura": "sensor.t", "sensor_humedad": "sensor.h",
              "sensor_radiacion": "sensor.r", "altura_anemometro": 7.0,
              "viento_minimo": 0.0, "factor_radiacion": 1.0, "factor_lux": 126.7}
