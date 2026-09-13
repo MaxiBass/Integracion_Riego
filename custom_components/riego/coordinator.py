@@ -209,6 +209,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "ultima_integracion": guardado.get("ultima_integracion"),
             "aplazado_lluvia": guardado.get("aplazado_lluvia", False),
             "ultimo_ciclo": guardado.get("ultimo_ciclo"),
+            "ultimo_ciclo_programado": guardado.get("ultimo_ciclo_programado"),
             "zonas": guardado.get("zonas", {}),
             CONF_SIMULACION: guardado.get(CONF_SIMULACION),
         }
@@ -528,7 +529,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # comprobación, replanificar justo después de regar volvería a
         # programar un segundo ciclo antes del mismo amanecer.
         ya_ejecutado = False
-        if marca := self._estado.get("ultimo_ciclo"):
+        if marca := self._estado.get("ultimo_ciclo_programado"):
             if (ultimo := dt_util.parse_datetime(marca)) is not None:
                 ya_ejecutado = ultimo > amanecer - VENTANA_CICLO_CUMPLIDO
 
@@ -561,25 +562,35 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _disparar_ciclo(self, _ahora: datetime) -> None:
         self._cancelar_ciclo = None
         try:
-            await self.ejecutar_ciclo()
+            await self.ejecutar_ciclo(programado=True)
         finally:
             self._planificar()
             await self.async_refresh()
 
     # ── Ejecución del ciclo ───────────────────────────────────────────
 
-    async def ejecutar_ciclo(self, forzar_simulacion: bool | None = None) -> dict[str, Any]:
-        """Aplica el balance hídrico y riega las zonas que lo pidan."""
+    async def ejecutar_ciclo(
+        self, forzar_simulacion: bool | None = None, programado: bool = False
+    ) -> dict[str, Any]:
+        """Aplica el balance hídrico y riega las zonas que lo pidan.
+
+        `programado` distingue el ciclo que dispara el planificador del que se
+        lanza a mano con el servicio. Solo el primero marca el amanecer como
+        cumplido: si un ciclo manual lo marcara, el ciclo real de esa
+        madrugada se saltaría sin avisar.
+        """
         if self._ciclo_en_curso:
             _LOGGER.warning("Ciclo de riego ya en curso; se ignora la nueva ejecución")
             return {"resultado": "ya_en_curso"}
         self._ciclo_en_curso = True
         try:
-            return await self._ejecutar_ciclo(forzar_simulacion)
+            return await self._ejecutar_ciclo(forzar_simulacion, programado)
         finally:
             self._ciclo_en_curso = False
 
-    async def _ejecutar_ciclo(self, forzar_simulacion: bool | None = None) -> dict[str, Any]:
+    async def _ejecutar_ciclo(
+        self, forzar_simulacion: bool | None = None, programado: bool = False
+    ) -> dict[str, Any]:
         simulacion = self.simulacion if forzar_simulacion is None else forzar_simulacion
         op = self.opciones
         resumen: dict[str, Any] = {"simulacion": simulacion, "zonas": {}}
@@ -599,6 +610,8 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._estado["et0_periodo_anterior"] = round(et0_periodo, 2)
         self._estado["et0_acumulada"] = 0.0
         self._estado["ultimo_ciclo"] = dt_util.utcnow().isoformat()
+        if programado:
+            self._estado["ultimo_ciclo_programado"] = self._estado["ultimo_ciclo"]
         await self._guardar()
 
         resumen["et0_periodo"] = round(et0_periodo, 2)

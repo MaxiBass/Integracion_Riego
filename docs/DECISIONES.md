@@ -480,3 +480,20 @@ Se añadió además una prueba de los ficheros de traducción: valida el JSON y
 que todo paso propio que pinta pantalla tenga su texto en los tres ficheros.
 Salió de que, al editar los JSON con un heredoc, un `\n` se coló como texto
 literal detrás del objeto y los dejó inválidos sin que nada lo avisara.
+
+### 7.4 Un ciclo manual cancelaba el programado (v0.2.3)
+
+Detectado al verificar el alta recién creada. La guarda que impide programar
+dos ciclos para el mismo amanecer (§4.1) se apoyaba en `ultimo_ciclo`, que
+se escribe en **cualquier** ejecución, también en la del servicio
+`riego.ejecutar_ciclo`. Consecuencia: lanzar un ciclo a mano por la tarde
+—lo natural para ver números durante la fase de simulación— marcaba el
+amanecer siguiente como cumplido y el ciclo real se saltaba sin avisar.
+
+Desde v0.2.4 la guarda usa `ultimo_ciclo_programado`, que solo escribe el
+planificador. `ultimo_ciclo` se mantiene para el sensor «Último ciclo», que
+sí debe reflejar también las ejecuciones manuales.
+
+No hay riesgo de doble riego: el ciclo manual pone a cero el acumulado de
+ET₀, así que el programado de esa madrugada encuentra un déficit nuevo de
+casi cero y no envía nada.
