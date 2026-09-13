@@ -314,3 +314,75 @@ Nota para futuras versiones: HA 2026.9 ya no usa `voluptuous_serialize` para
 los esquemas de los flujos, usa `to_field_list` de **probatio**, que sustituye
 a `voluptuous`. Al probar hay que importar `homeassistant` **antes** que nada
 que importe `voluptuous`, o las referencias no se resuelven.
+
+---
+
+## 8. La estación meteorológica (Ecowitt vía MQTT)
+
+Inventario de lo que publica `sensor.estacion_meteorologica_raw_data` y qué
+usa la integración:
+
+| Campo Ecowitt | Entidad | Uso en ET₀ |
+|---|---|---|
+| `tempf` | Outdoor Temperature (°C) | **Temperatura** |
+| `humidity` | Humidity (%) | **Humedad relativa** |
+| `solarradiation` | Solar Radiation (W/m²) | **Radiación** |
+| `baromabsin` | Absolute Pressure (hPa) | **Presión** |
+| `baromrelin` | Relative Pressure (hPa) | no usar |
+| `windspeedmph` | Wind Speed (km/h) | **Viento** |
+| `last24hrainin` | 24h Rain (mm) | **Lluvia efectiva** |
+| `vpd` | Vapour Pressure Deficit (kPa) | no usado; la integración calcula es−ea |
+| `uv`, `winddir`, `dewpoint`, lluvias varias, interiores | — | no usados |
+
+### 8.1 Humedad: relativa
+
+`humidity` es humedad **relativa** en % (entero 0-100), que es la que pide
+FAO-56. La absoluta iría en g/m³ y la estación no la publica.
+
+### 8.2 Presión: la absoluta
+
+FAO-56 Ec. 8 necesita la presión **real del emplazamiento**, no la reducida
+a nivel del mar. En Ecowitt eso es `baromabsin`.
+
+En esta instalación concreta ambas marcan lo mismo (1003,4 hPa) porque el
+offset de presión relativa nunca se configuró en la consola. Aunque
+divergieran, a 120 m de altitud la diferencia en ET₀ es del **0,28 %**
+(hay una prueba que lo comprueba). La elección importa poco aquí, pero la
+correcta es la absoluta.
+
+Desde v0.2.0 el sensor de presión es **opcional**: sin él se estima a partir
+de la altitud configurada en Home Assistant (FAO-56 Ec. 7), que a 120 m da
+998,9 hPa frente a los 1003,4 medidos — dentro del 1 % en ET₀.
+
+### 8.3 Iluminancia como alternativa a la radiación
+
+Desde v0.2.0 se puede alimentar la ET₀ con un sensor de **lux** en lugar de
+uno de W/m², con factor de conversión configurable (126,7 por defecto, que
+es el que usan Ecowitt y Fine Offset).
+
+Aviso importante para esta instalación: `sensor.estacion_meteorologica_solar_lux`
+**no es una medida independiente**, se calcula como
+`solarradiation × 126.7`. Dividirlo otra vez por 126,7 devuelve exactamente
+el valor de partida, así que aquí da igual cuál se elija. La opción existe
+para estaciones que solo publican lux.
+
+Esto también explica por qué el piranómetro supera el máximo teórico de
+cielo despejado (§2.3): el hardware mide luz y deriva W/m² con un factor
+fijo, cuando la eficacia luminosa real de la radiación solar varía con la
+altura del sol y la nubosidad.
+
+### 8.4 Bug de precedencia en la conversión de viento
+
+En `packages/meteorologia/estacion.yaml`:
+
+```jinja
+{{ mph | float * 1.60934 | round(1) }}
+```
+
+El filtro `round(1)` se aplica a la constante, no al producto, así que
+multiplica por **1,6** en vez de 1,60934 y el `round` nunca actúa. El viento
+sale un **0,58 % bajo**. Afecta a Wind Speed, Wind Gust y Max Daily Gust. El
+paréntesis correcto es `{{ (mph | float * 1.60934) | round(1) }}`.
+
+Impacto en ET₀: despreciable (el término aerodinámico es una fracción
+pequeña del total). Queda anotado, pendiente de decidir si se corrige.

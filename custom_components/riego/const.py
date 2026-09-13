@@ -20,6 +20,8 @@ EVENTO: Final = "riego_evento"
 CONF_SENSOR_TEMP: Final = "sensor_temperatura"
 CONF_SENSOR_HUMEDAD: Final = "sensor_humedad"
 CONF_SENSOR_RADIACION: Final = "sensor_radiacion"
+CONF_SENSOR_ILUMINANCIA: Final = "sensor_iluminancia"
+CONF_FACTOR_LUX: Final = "factor_lux"
 CONF_SENSOR_VIENTO: Final = "sensor_viento"
 CONF_SENSOR_PRESION: Final = "sensor_presion"
 CONF_SENSOR_LLUVIA: Final = "sensor_lluvia_24h"
@@ -85,6 +87,10 @@ DEFECTO_VIENTO_MINIMO: Final = 0.0
 # los sensores que derivan W/m² de un lux-metro con factor fijo. Se deja a
 # 1,0 para no alterar nada sin decisión explícita.
 DEFECTO_FACTOR_RADIACION: Final = 1.0
+# Luxes por cada W/m². 126,7 es el factor que usan las estaciones Ecowitt /
+# Fine Offset y el habitual para luz solar; solo es exacto con el sol alto y
+# cielo despejado, así que es configurable.
+DEFECTO_FACTOR_LUX: Final = 126.7
 DEFECTO_LLUVIA_MINIMA: Final = 2.0
 DEFECTO_LLUVIA_CAP: Final = 20.0
 DEFECTO_LLUVIA_PREVISTA: Final = 3.0

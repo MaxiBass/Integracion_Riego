@@ -6,19 +6,23 @@
         "description": "Inputs for the hourly FAO-56 Penman-Monteith ET₀ calculation. Temperature, humidity and solar radiation are required; without wind and pressure the calculation still runs on defaults but loses accuracy.",
         "data": {
           "sensor_temperatura": "Outdoor temperature (°C)",
-          "sensor_humedad": "Relative humidity (%)",
+          "sensor_humedad": "RELATIVE humidity (%)",
           "sensor_radiacion": "Solar radiation (W/m²)",
           "sensor_viento": "Wind speed",
-          "sensor_presion": "Atmospheric pressure (hPa or kPa)",
+          "sensor_presion": "ABSOLUTE atmospheric pressure",
           "sensor_lluvia_24h": "24 h rainfall (mm)",
           "altura_anemometro": "Anemometer height",
           "viento_minimo": "Minimum wind speed for the calculation",
-          "factor_radiacion": "Pyranometer calibration factor"
+          "factor_radiacion": "Pyranometer calibration factor",
+          "sensor_iluminancia": "…or an illuminance sensor (lx)",
+          "factor_lux": "Lux per W/m²"
         },
         "data_description": {
           "altura_anemometro": "Used to convert the measured speed to the 2 m value FAO-56 requires.",
           "viento_minimo": "FAO-56 suggests 0.5 m/s so the aerodynamic term does not collapse in very calm conditions. 0 disables the floor.",
-          "factor_radiacion": "Multiplies the sensor reading. Lower it if your station exceeds the theoretical clear-sky maximum, common in sensors deriving W/m² from a lux meter."
+          "factor_radiacion": "Multiplies the sensor reading. Lower it if your station exceeds the theoretical clear-sky maximum, common in sensors deriving W/m² from a lux meter.",
+          "sensor_presion": "The ABSOLUTE (station) pressure, not the sea-level-adjusted one. Leave empty to estimate it from the elevation configured in Home Assistant.",
+          "sensor_iluminancia": "For sensors that only report lux. Note: if your lux entity is itself derived from radiation by a fixed factor, it is not an independent measurement."
         }
       },
       "prevision": {
@@ -77,14 +81,17 @@
       "otra": {
         "title": "Add another zone?",
         "description": "Zones defined so far: {zonas}",
-        "data": {"añadir_otra": "Add another zone"}
+        "data": {
+          "añadir_otra": "Add another zone"
+        }
       }
     },
     "error": {
       "kc_invalido": "Enter exactly 12 Kc values between 0 and 3, comma separated.",
       "nombre_requerido": "The zone needs a name.",
       "topic_requerido": "The zone needs an MQTT topic.",
-      "zona_duplicada": "A zone with that name already exists."
+      "zona_duplicada": "A zone with that name already exists.",
+      "falta_irradiancia": "A solar radiation (W/m²) or illuminance (lx) sensor is required."
     },
     "abort": {
       "single_instance_allowed": "Only one Riego instance is supported; add more zones from its options."
@@ -101,21 +108,55 @@
           "zonas": "Zones"
         }
       },
-      "meteo": {"title": "Weather sensors"},
-      "prevision": {"title": "Rain forecast and protections"},
-      "ciclo": {"title": "Cycle planning"},
-      "zonas": {"title": "Zones", "description": "Pick a zone to edit, or add a new one.", "data": {"zona": "Zone"}},
-      "editar_zona": {"title": "Edit zone", "data": {"eliminar": "Delete this zone"}}
+      "meteo": {
+        "title": "Weather sensors",
+        "data": {
+          "sensor_humedad": "RELATIVE humidity (%)",
+          "sensor_radiacion": "Solar radiation (W/m²)",
+          "sensor_iluminancia": "…or an illuminance sensor (lx)",
+          "factor_lux": "Lux per W/m²",
+          "sensor_presion": "ABSOLUTE atmospheric pressure"
+        },
+        "data_description": {
+          "sensor_presion": "The ABSOLUTE (station) pressure, not the sea-level-adjusted one. Leave empty to estimate it from the elevation configured in Home Assistant.",
+          "sensor_iluminancia": "For sensors that only report lux. Note: if your lux entity is itself derived from radiation by a fixed factor, it is not an independent measurement."
+        }
+      },
+      "prevision": {
+        "title": "Rain forecast and protections"
+      },
+      "ciclo": {
+        "title": "Cycle planning"
+      },
+      "zonas": {
+        "title": "Zones",
+        "description": "Pick a zone to edit, or add a new one.",
+        "data": {
+          "zona": "Zone"
+        }
+      },
+      "editar_zona": {
+        "title": "Edit zone",
+        "data": {
+          "eliminar": "Delete this zone"
+        }
+      }
     },
     "error": {
       "kc_invalido": "Enter exactly 12 Kc values between 0 and 3, comma separated.",
       "nombre_requerido": "The zone needs a name.",
       "topic_requerido": "The zone needs an MQTT topic.",
-      "zona_duplicada": "A zone with that name already exists."
+      "zona_duplicada": "A zone with that name already exists.",
+      "falta_irradiancia": "A solar radiation (W/m²) or illuminance (lx) sensor is required."
     }
   },
   "selector": {
-    "forecast_tipo": {"options": {"hourly": "Hourly", "daily": "Daily"}},
+    "forecast_tipo": {
+      "options": {
+        "hourly": "Hourly",
+        "daily": "Daily"
+      }
+    },
     "modo_inicio": {
       "options": {
         "fin_amanecer": "Finish at sunrise (recommended)",
@@ -125,10 +166,55 @@
     }
   },
   "services": {
-    "ejecutar_ciclo": {"name": "Run cycle", "description": "Runs the water-balance cycle right now.", "fields": {"simulacion": {"name": "Force simulation", "description": "Overrides the global switch for this run only."}}},
-    "regar_zona": {"name": "Water zone", "description": "Sends a specific dose to a zone, bypassing the water balance.", "fields": {"zona": {"name": "Zone", "description": "Zone id or name."}, "litros": {"name": "Litres", "description": "Volume to send."}}},
-    "ajustar_deficit": {"name": "Adjust deficit", "description": "Sets or corrects a zone's accumulated water deficit.", "fields": {"zona": {"name": "Zone", "description": "Zone id or name."}, "valor": {"name": "Value (mm)", "description": "Deficit to set, or increment if relative."}, "relativo": {"name": "Relative", "description": "Add to the current deficit instead of replacing it."}}},
-    "saltar_dia": {"name": "Skip next cycle", "description": "The next cycle will only accumulate deficit, without watering."},
-    "reiniciar_temporada": {"name": "Reset season counters", "description": "Zeroes the accumulated season litres."}
+    "ejecutar_ciclo": {
+      "name": "Run cycle",
+      "description": "Runs the water-balance cycle right now.",
+      "fields": {
+        "simulacion": {
+          "name": "Force simulation",
+          "description": "Overrides the global switch for this run only."
+        }
+      }
+    },
+    "regar_zona": {
+      "name": "Water zone",
+      "description": "Sends a specific dose to a zone, bypassing the water balance.",
+      "fields": {
+        "zona": {
+          "name": "Zone",
+          "description": "Zone id or name."
+        },
+        "litros": {
+          "name": "Litres",
+          "description": "Volume to send."
+        }
+      }
+    },
+    "ajustar_deficit": {
+      "name": "Adjust deficit",
+      "description": "Sets or corrects a zone's accumulated water deficit.",
+      "fields": {
+        "zona": {
+          "name": "Zone",
+          "description": "Zone id or name."
+        },
+        "valor": {
+          "name": "Value (mm)",
+          "description": "Deficit to set, or increment if relative."
+        },
+        "relativo": {
+          "name": "Relative",
+          "description": "Add to the current deficit instead of replacing it."
+        }
+      }
+    },
+    "saltar_dia": {
+      "name": "Skip next cycle",
+      "description": "The next cycle will only accumulate deficit, without watering."
+    },
+    "reiniciar_temporada": {
+      "name": "Reset season counters",
+      "description": "Zeroes the accumulated season litres."
+    }
   }
 }

@@ -20,6 +20,7 @@ from .const import (
     CONF_ALTURA_ANEMOMETRO,
     CONF_DEFICIT_MAXIMO,
     CONF_DESFASE_ZONAS,
+    CONF_FACTOR_LUX,
     CONF_FACTOR_RADIACION,
     CONF_FORECAST_HORAS,
     CONF_FORECAST_TIPO,
@@ -33,6 +34,7 @@ from .const import (
     CONF_NOTIFY,
     CONF_OFFSET_AMANECER,
     CONF_SENSOR_HUMEDAD,
+    CONF_SENSOR_ILUMINANCIA,
     CONF_SENSOR_LLUVIA,
     CONF_SENSOR_PRESION,
     CONF_SENSOR_RADIACION,
@@ -47,6 +49,7 @@ from .const import (
     DEFECTO_CAUDAL,
     DEFECTO_DEFICIT_MAXIMO,
     DEFECTO_DESFASE_ZONAS,
+    DEFECTO_FACTOR_LUX,
     DEFECTO_FACTOR_RADIACION,
     DEFECTO_FACTOR_ZONA,
     DEFECTO_FORECAST_HORAS,
@@ -112,9 +115,17 @@ def esquema_meteo(valores: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 CONF_SENSOR_HUMEDAD, default=valores.get(CONF_SENSOR_HUMEDAD)
             ): _sensor(),
-            vol.Required(
-                CONF_SENSOR_RADIACION, default=valores.get(CONF_SENSOR_RADIACION)
+            vol.Optional(
+                CONF_SENSOR_RADIACION,
+                description={"suggested_value": valores.get(CONF_SENSOR_RADIACION)},
             ): _sensor(),
+            vol.Optional(
+                CONF_SENSOR_ILUMINANCIA,
+                description={"suggested_value": valores.get(CONF_SENSOR_ILUMINANCIA)},
+            ): _sensor(),
+            vol.Required(
+                CONF_FACTOR_LUX, default=valores.get(CONF_FACTOR_LUX, DEFECTO_FACTOR_LUX)
+            ): _numero(1, 1000, 0.1, "lx/(W/m²)"),
             vol.Optional(
                 CONF_SENSOR_VIENTO, description={"suggested_value": valores.get(CONF_SENSOR_VIENTO)}
             ): _sensor(),
@@ -134,7 +145,8 @@ def esquema_meteo(valores: dict[str, Any]) -> vol.Schema:
                 default=valores.get(CONF_VIENTO_MINIMO, DEFECTO_VIENTO_MINIMO),
             ): _numero(0, 2, 0.1, "m/s"),
             vol.Required(
-                CONF_FACTOR_RADIACION,
+                CONF_FACTOR_LUX,
+    CONF_FACTOR_RADIACION,
                 default=valores.get(CONF_FACTOR_RADIACION, DEFECTO_FACTOR_RADIACION),
             ): _numero(0.5, 1.5, 0.01),
         }
@@ -254,6 +266,13 @@ def esquema_zona(valores: dict[str, Any]) -> vol.Schema:
     )
 
 
+def _validar_meteo(datos: dict[str, Any]) -> dict[str, str]:
+    """La ET₀ necesita irradiancia: directa en W/m², o derivada de lux."""
+    if not datos.get(CONF_SENSOR_RADIACION) and not datos.get(CONF_SENSOR_ILUMINANCIA):
+        return {"base": "falta_irradiancia"}
+    return {}
+
+
 def _normalizar_zona(datos: dict[str, Any], zid: str | None = None) -> tuple[dict, dict]:
     """Valida y normaliza el formulario de una zona. Devuelve (zona, errores)."""
     errores: dict[str, str] = {}
@@ -291,6 +310,10 @@ class RiegoConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
         if user_input is not None:
+            if errores := _validar_meteo(user_input):
+                return self.async_show_form(
+                    step_id="user", data_schema=esquema_meteo(user_input), errors=errores
+                )
             self._datos.update(user_input)
             return await self.async_step_prevision()
         return self.async_show_form(step_id="user", data_schema=esquema_meteo({}))
@@ -360,6 +383,10 @@ class RiegoOptionsFlow(OptionsFlow):
 
     async def async_step_meteo(self, user_input=None) -> ConfigFlowResult:
         if user_input is not None:
+            if errores := _validar_meteo(user_input):
+                return self.async_show_form(
+                    step_id="meteo", data_schema=esquema_meteo(user_input), errors=errores
+                )
             return await self._guardar(user_input)
         return self.async_show_form(step_id="meteo", data_schema=esquema_meteo(self._valores))
 
