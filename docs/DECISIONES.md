@@ -497,3 +497,25 @@ sí debe reflejar también las ejecuciones manuales.
 No hay riesgo de doble riego: el ciclo manual pone a cero el acumulado de
 ET₀, así que el programado de esa madrugada encuentra un déficit nuevo de
 casi cero y no envía nada.
+
+
+### 7.5 Dos defectos de la estrategia de panel (v0.2.4)
+
+Al crear el panel en la instalación real, la estrategia generó bien las
+cuatro secciones pero con dos fallos visibles:
+
+- **Una tarjeta «Error de configuración» por zona.** El tile del interruptor
+  declaraba `features: [{type: "switch-toggle"}]`. Esa característica no
+  existe en Home Assistant; para un switch es `toggle`.
+- **La sección «Ajustes» vacía.** La tarjeta `entities` con los cuatro
+  `number` sí se generaba con su contenido —comprobado ejecutando
+  `ll-strategy-dashboard-riego.generate()` en la propia página— pero una
+  tarjeta `entities` se colapsa dentro de una vista de tipo `sections`. Se
+  sustituye por un tile por número con `numeric-input`.
+
+Añadido de paso: los tiles muestran ahora el nombre sin el prefijo del
+dispositivo. Con `has_entity_name`, el `friendly_name` es «Zona Frutales
+Déficit acumulado», que en una columna estrecha se trunca y no se lee.
+
+No hay forma de probar esto sin un navegador: la estrategia solo se ejecuta
+en el frontend. Se verificó abriendo el panel y comparando antes y después.

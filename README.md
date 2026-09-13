@@ -60,6 +60,11 @@ strategy:
 El panel se reconstruye solo cuando añades o quitas zonas. Si no aparece,
 recarga con Ctrl+F5: el módulo se sirve en `/riego_static/riego-strategy.js`.
 
+Si prefieres un panel fijo que puedas editar a mano, no uses la estrategia y
+monta las tarjetas tú: una vista de tipo `sections`, una sección por zona con
+tiles de las entidades, los `number` con la característica `numeric-input` y
+los `switch` con `toggle`.
+
 ## Servicios
 
 | Servicio | Para qué |

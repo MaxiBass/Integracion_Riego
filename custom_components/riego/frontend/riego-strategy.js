@@ -70,7 +70,23 @@ function ordenar(entidades, orden) {
   return [...entidades].sort((a, b) => peso(a) - peso(b) || a.localeCompare(b));
 }
 
+/** Nombre corto: el friendly_name incluye el del dispositivo por delante. */
+function nombreCorto(hass, entityId, nombreDispositivo) {
+  const completo = (hass.states[entityId] || {}).attributes?.friendly_name || entityId;
+  if (nombreDispositivo && completo.startsWith(nombreDispositivo + " ")) {
+    return completo.slice(nombreDispositivo.length + 1);
+  }
+  return completo;
+}
+
 const tarjeta = (entity, extra = {}) => ({ type: "tile", entity, ...extra });
+
+// El tile de un switch usa la caracteristica "toggle". "switch-toggle" no
+// existe y hace que HA pinte una tarjeta de error de configuracion.
+const TOGGLE = [{ type: "toggle" }];
+// Los number se editan con un tile de entrada numerica: una tarjeta
+// "entities" se colapsa dentro de una vista de secciones.
+const ENTRADA_NUM = [{ type: "numeric-input", style: "box" }];
 
 function seccionSistema(hass, entidades) {
   const sensores = ordenar(
@@ -80,13 +96,14 @@ function seccionSistema(hass, entidades) {
   const interruptores = entidades.filter((e) => e.startsWith("switch."));
   const binarios = entidades.filter((e) => e.startsWith("binary_sensor."));
 
+  const n = (e) => nombreCorto(hass, e, "Balance Hídrico");
   return {
     type: "grid",
     cards: [
       { type: "heading", heading: "Balance hídrico", heading_style: "title", icon: "mdi:water-sync" },
-      ...sensores.map((e) => tarjeta(e)),
-      ...binarios.map((e) => tarjeta(e)),
-      ...interruptores.map((e) => tarjeta(e, { features: [{ type: "switch-toggle" }] })),
+      ...sensores.map((e) => tarjeta(e, { name: n(e) })),
+      ...binarios.map((e) => tarjeta(e, { name: n(e) })),
+      ...interruptores.map((e) => tarjeta(e, { name: n(e), features: TOGGLE })),
     ],
   };
 }
@@ -101,19 +118,19 @@ function seccionZona(hass, nombre, entidades) {
   const numeros = entidades.filter((e) => e.startsWith("number."));
   const deficit = sensores.find((e) => e.endsWith("_deficit"));
 
+  const n = (e) => nombreCorto(hass, e, nombre);
   const tarjetas = [
     { type: "heading", heading: nombre, heading_style: "title", icon: "mdi:sprinkler-variant" },
-    ...interruptores.map((e) => tarjeta(e, { features: [{ type: "switch-toggle" }] })),
-    ...binarios.map((e) => tarjeta(e)),
-    ...sensores.map((e) => tarjeta(e)),
+    ...interruptores.map((e) => tarjeta(e, { name: n(e), features: TOGGLE })),
+    ...binarios.map((e) => tarjeta(e, { name: n(e) })),
+    ...sensores.map((e) => tarjeta(e, { name: n(e) })),
   ];
 
   if (numeros.length) {
     tarjetas.push({ type: "heading", heading: "Ajustes", heading_style: "subtitle" });
-    tarjetas.push({
-      type: "entities",
-      entities: numeros,
-    });
+    for (const e of numeros) {
+      tarjetas.push(tarjeta(e, { name: n(e), features: ENTRADA_NUM }));
+    }
   }
 
   if (deficit) {
