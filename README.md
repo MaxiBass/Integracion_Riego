@@ -74,6 +74,16 @@ Además, cada hito del ciclo dispara el evento `riego_evento`, por si
 prefieres construir tus propios avisos en lugar de usar la entidad de
 notificación.
 
+## Pruebas
+
+```bash
+python3 tests/test_riego.py
+```
+
+Las pruebas de ET₀ funcionan con Python a secas. Las del flujo de
+configuración y del coordinador necesitan Home Assistant instalado; si no
+lo está, se saltan avisando.
+
 ## Requisitos
 
 - Home Assistant 2024.6 o posterior.
