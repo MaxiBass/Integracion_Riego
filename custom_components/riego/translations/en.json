@@ -79,10 +79,11 @@
         }
       },
       "otra": {
-        "title": "Add another zone?",
-        "description": "Zones defined so far: {zonas}",
-        "data": {
-          "añadir_otra": "Add another zone"
+        "title": "Zones added",
+        "description": "Zones defined so far: {zonas}\n\nChoose «Finish» to create the integration.",
+        "menu_options": {
+          "zona": "➕ Add another zone",
+          "finalizar": "✅ Finish and create the integration"
         }
       }
     },

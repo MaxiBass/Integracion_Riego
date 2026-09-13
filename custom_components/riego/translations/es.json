@@ -91,10 +91,11 @@
         }
       },
       "otra": {
-        "title": "¿Añadir otra zona?",
-        "description": "Zonas definidas hasta ahora: {zonas}",
-        "data": {
-          "añadir_otra": "Añadir otra zona"
+        "title": "Zonas añadidas",
+        "description": "Zonas definidas hasta ahora: {zonas}\n\nElige «Terminar» para crear la integración.",
+        "menu_options": {
+          "zona": "➕ Añadir otra zona",
+          "finalizar": "✅ Terminar y crear la integración"
         }
       }
     },

@@ -224,8 +224,22 @@ def test_config_flow() -> None:
         sin_topic = await f.async_step_zona(dict(zona, topic=""))
         comprobar(sin_topic.get("errors", {}).get("topic") == "topic_requerido", "zona sin topic se rechaza")
 
-        f.async_create_entry = lambda **k: {"type": "create_entry", **k}
-        final = await f.async_step_otra({"añadir_otra": False})
+        # El paso final es un menú, no una casilla: un formulario con una sola
+        # casilla desmarcada parecía una pantalla sin acción y la entrada no
+        # llegaba a crearse si no se pulsaba «Enviar».
+        menu = await f.async_step_otra(None)
+        tipo = menu["type"].value if hasattr(menu["type"], "value") else menu["type"]
+        comprobar(tipo == "menu", f"el paso final es un menú (es {tipo})")
+        comprobar(menu.get("menu_options") == ["zona", "finalizar"],
+                  f"el menú ofrece añadir zona o terminar: {menu.get('menu_options')}")
+
+        # Se usa el async_create_entry REAL de Home Assistant, no un doble: el
+        # doble ocultaba que este camino no se estaba ejercitando de verdad.
+        f.flow_id, f.handler, f.context = "test", "riego", {"source": "user"}
+        final = await f.async_step_finalizar(None)
+        tipo = final["type"].value if hasattr(final["type"], "value") else final["type"]
+        comprobar(tipo == "create_entry", f"terminar crea la entrada (devuelve {tipo})")
+        comprobar(final.get("title") == "Riego", "la entrada se titula Riego")
         zonas = final["data"]["zonas"]
         comprobar(zonas[0]["id"] == "frutales", "id de zona derivado del nombre")
         comprobar(zonas[0]["kc"] == [0.42, 0.42, 0.52, 0.63, 0.74, 0.76, 0.76, 0.76,
@@ -245,6 +259,45 @@ def test_config_flow() -> None:
         serializable(await o.async_step_editar_zona(None), "opciones editar zona")
 
     asyncio.run(recorrido())
+
+
+def test_traducciones() -> None:
+    """Los JSON deben ser válidos y cubrir todos los pasos y errores."""
+    import json
+
+    print("\nFicheros de traducción")
+    base = RAIZ / "custom_components" / "riego"
+    ficheros = ["strings.json", "translations/es.json", "translations/en.json"]
+    cargados = {}
+    for nombre in ficheros:
+        ruta = base / nombre
+        try:
+            cargados[nombre] = json.loads(ruta.read_text())
+            comprobar(True, f"{nombre} es JSON válido")
+        except Exception as err:  # noqa: BLE001
+            comprobar(False, f"{nombre} es JSON válido ({err})")
+            return
+
+    from custom_components.riego import config_flow as cf
+
+    # Solo los pasos propios: dir() arrastra los de descubrimiento que hereda
+    # de ConfigFlow (dhcp, ssdp, zeroconf...), que no llevan texto. Y
+    # "finalizar" no pinta pantalla, crea la entrada y punto.
+    sin_pantalla = {"finalizar"}
+    pasos_config = {n[len("async_step_"):] for n in vars(cf.RiegoConfigFlow)
+                    if n.startswith("async_step_")} - sin_pantalla
+    pasos_opciones = {n[len("async_step_"):] for n in vars(cf.RiegoOptionsFlow)
+                      if n.startswith("async_step_")} - sin_pantalla
+    for nombre, d in cargados.items():
+        faltan = pasos_config - set(d.get("config", {}).get("step", {}))
+        comprobar(not faltan, f"{nombre}: todos los pasos del alta tienen texto (faltan {faltan})")
+        faltan = pasos_opciones - set(d.get("options", {}).get("step", {}))
+        comprobar(not faltan, f"{nombre}: todos los pasos de opciones tienen texto (faltan {faltan})")
+
+    for nombre, d in cargados.items():
+        otra = d["config"]["step"]["otra"]
+        comprobar(set(otra.get("menu_options", {})) == {"zona", "finalizar"},
+                  f"{nombre}: el paso final ofrece las dos opciones del menú")
 
 
 # ── Coordinador ───────────────────────────────────────────────────────
@@ -461,6 +514,7 @@ def test_coordinador() -> None:
 if __name__ == "__main__":
     test_et0()
     test_irradiancia_desde_lux()
+    test_traducciones()
     try:
         test_config_flow()
         test_coordinador()

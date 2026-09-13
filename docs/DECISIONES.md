@@ -435,3 +435,31 @@ una sola vez.
 Lección aplicable a este repo: editar Python con sustituciones de texto sin
 anclar la indentación completa es frágil. Si hay que hacerlo, incluir en el
 patrón la indentación real de la línea.
+
+### 7.3 El alta no llegaba a crearse (v0.2.1)
+
+El usuario rellenó los cuatro pasos y las tres zonas, pero no aparecía
+ninguna integración. Comprobado en su HA: **no existía ninguna entrada de
+configuración de `riego`**, y no había ni un solo error de la integración en
+el log. Es decir, el flujo no falló: nunca llegó a `async_create_entry`.
+
+La causa era de diseño, no de código. El último paso era un formulario con
+una sola casilla desmarcada, «Añadir otra zona». Visualmente parece una
+pantalla sin nada que hacer, así que es natural cerrar el diálogo en lugar
+de pulsar «Enviar» — y es justo ese «Enviar» el que creaba la entrada.
+
+Sustituido por un menú de dos opciones explícitas: «➕ Añadir otra zona» y
+«✅ Terminar y crear la integración».
+
+Por qué las pruebas no lo detectaron: el recorrido del flujo sustituía
+`async_create_entry` por un doble, así que verificaba los datos que se le
+pasaban pero no que ese camino se recorriera de verdad ni que la pantalla
+anterior fuese usable. Ahora la prueba usa el `async_create_entry` real de
+Home Assistant (con `flow_id`, `handler` y `context` puestos como hace el
+gestor de flujos) y comprueba que el paso previo es un menú con las dos
+opciones.
+
+Se añadió además una prueba de los ficheros de traducción: valida el JSON y
+que todo paso propio que pinta pantalla tenga su texto en los tres ficheros.
+Salió de que, al editar los JSON con un heredoc, un `\n` se coló como texto
+literal detrás del objeto y los dejó inválidos sin que nada lo avisara.

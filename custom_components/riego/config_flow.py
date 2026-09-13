@@ -342,17 +342,22 @@ class RiegoConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="zona", data_schema=esquema_zona({}))
 
     async def async_step_otra(self, user_input=None) -> ConfigFlowResult:
-        if user_input is not None:
-            if user_input.get("añadir_otra"):
-                return await self.async_step_zona()
-            return self.async_create_entry(title="Riego", data=self._datos)
-        return self.async_show_form(
+        """Menú explícito de dos opciones.
+
+        Antes era un formulario con una única casilla desmarcada, que parecía
+        una pantalla sin acción: si no se pulsaba «Enviar», la entrada no
+        llegaba a crearse nunca. Un menú deja claro que hay que elegir.
+        """
+        return self.async_show_menu(
             step_id="otra",
-            data_schema=vol.Schema({vol.Required("añadir_otra", default=False): bool}),
+            menu_options=["zona", "finalizar"],
             description_placeholders={
                 "zonas": ", ".join(z[Z_NOMBRE] for z in self._datos[CONF_ZONAS])
             },
         )
+
+    async def async_step_finalizar(self, user_input=None) -> ConfigFlowResult:
+        return self.async_create_entry(title="Riego", data=self._datos)
 
     @staticmethod
     @callback
