@@ -92,15 +92,17 @@ def _sensor(dominios: list[str] | str = "sensor") -> selector.EntitySelector:
 def _numero(
     minimo: float, maximo: float, paso: float, unidad: str | None = None
 ) -> selector.NumberSelector:
-    return selector.NumberSelector(
-        selector.NumberSelectorConfig(
-            min=minimo,
-            max=maximo,
-            step=paso,
-            mode=selector.NumberSelectorMode.BOX,
-            unit_of_measurement=unidad,
-        )
+    # unit_of_measurement solo se incluye si hay unidad: el esquema del
+    # selector exige str y rechaza None.
+    config = selector.NumberSelectorConfig(
+        min=minimo,
+        max=maximo,
+        step=paso,
+        mode=selector.NumberSelectorMode.BOX,
     )
+    if unidad:
+        config["unit_of_measurement"] = unidad
+    return selector.NumberSelector(config)
 
 
 def esquema_meteo(valores: dict[str, Any]) -> vol.Schema:

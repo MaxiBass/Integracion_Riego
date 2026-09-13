@@ -268,5 +268,49 @@ que publican en el mismo topic. No se borran, pero no hay que tocarlas.
   anterior: si al día siguiente sigue dando lluvia, riega igual.
 - La API de estrategias de Lovelace no está congelada; si una actualización
   de HA la rompe, el panel se puede rehacer a mano con tarjetas normales.
-- No hay tests automatizados. `et0.py` no tiene dependencias de HA
-  precisamente para poder probarlo aislado; escribirlos está pendiente.
+- La cobertura de `tests/test_riego.py` es de comportamiento, no exhaustiva:
+  cubre ET₀, los dos flujos de configuración y las ramas del ciclo, pero no
+  las entidades ni la estrategia de panel.
+
+
+---
+
+## 7. Incidencias posteriores
+
+### 7.1 `400: Bad Request` al abrir el flujo de configuración (v0.1.0)
+
+Primer intento de instalación: la integración aparecía en la lista, pero al
+pulsarla el frontend devolvía *«No se pudo cargar el flujo de configuración:
+400: Bad Request»*.
+
+Se descartó por razonamiento que fuera un fallo de importación (eso habría
+dado 404, no 400) y que fueran las dependencias (`mqtt` estaba cargado con
+500 entidades). El log en memoria de HA no tenía ninguna entrada de `riego`,
+y el fichero de log en disco está desactivado en esta instalación, así que
+no había traza que leer.
+
+Se reprodujo instalando Home Assistant 2026.9.2 en un entorno aislado y
+construyendo el formulario igual que lo hace el frontend:
+
+```
+probatio.error.MultipleInvalid: expected str at 'unit_of_measurement'
+```
+
+`NumberSelectorConfig` rechaza `unit_of_measurement=None`. El ayudante
+`_numero()` lo pasaba siempre, así que cualquier campo numérico **sin
+unidad** —`factor_radiacion` y el coeficiente de ajuste por zona— reventaba
+al construir el primer paso. Arreglado en v0.1.1 incluyendo la clave solo
+cuando hay unidad.
+
+De aquí salieron dos cosas más:
+
+- `tests/test_riego.py`, que recorre los dos flujos completos y serializa
+  cada esquema con `probatio.to_field_list`, que es exactamente lo que HA
+  manda al navegador. Este fallo se habría detectado antes de instalar.
+- El coordinador ahora pasa `config_entry` explícitamente a
+  `DataUpdateCoordinator`, como recomienda HA.
+
+Nota para futuras versiones: HA 2026.9 ya no usa `voluptuous_serialize` para
+los esquemas de los flujos, usa `to_field_list` de **probatio**, que sustituye
+a `voluptuous`. Al probar hay que importar `homeassistant` **antes** que nada
+que importe `voluptuous`, o las referencias no se resuelven.

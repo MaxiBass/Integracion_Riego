@@ -127,7 +127,9 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Mantiene el balance hídrico, la ET₀ acumulada y ejecuta el ciclo."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=None)
+        super().__init__(
+            hass, _LOGGER, name=DOMAIN, update_interval=None, config_entry=entry
+        )
         self.entry = entry
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._estado: dict[str, Any] = {}

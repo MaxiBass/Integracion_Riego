@@ -71,6 +71,25 @@ No copiar directamente en `/Volumes/config/custom_components/riego` sin
 antes editar en el repo — se perdería el historial de lo que realmente se
 probó.
 
+## Probar sin tocar el HA real
+
+Un fallo del flujo de configuración (v0.1.0) llegó a la instalación real
+porque no había forma de verificarlo antes. Ahora sí la hay:
+
+```bash
+python3 -m venv /tmp/hav
+/tmp/hav/bin/pip install homeassistant==2026.9.2 paho-mqtt
+/tmp/hav/bin/python tests/test_riego.py
+```
+
+Dos trampas de HA 2026.9 que costaron un rato:
+
+- Los esquemas de los flujos ya no se serializan con `voluptuous_serialize`,
+  sino con `to_field_list` de **probatio**, que sustituye a `voluptuous`.
+- Hay que importar `homeassistant` **antes** que cualquier cosa que importe
+  `voluptuous`, o `install_as_voluptuous()` no llega a tiempo y las
+  referencias apuntan al paquete equivocado.
+
 ## Módulo de cálculo
 
 `custom_components/riego/et0.py` no importa nada de Home Assistant a
