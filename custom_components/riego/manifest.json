@@ -1,7 +1,7 @@
 {
   "domain": "riego",
   "name": "Riego por Balance Hídrico",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Riego por balance hídrico FAO-56: ET₀ Penman-Monteith horaria, déficit acumulado por zona y dosificación volumétrica sobre electroválvulas Zigbee.",
   "documentation": "https://github.com/MaxiBass/Integracion_Riego",
   "issue_tracker": "https://github.com/MaxiBass/Integracion_Riego/issues",

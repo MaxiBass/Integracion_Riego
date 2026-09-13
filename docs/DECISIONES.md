@@ -386,3 +386,35 @@ paréntesis correcto es `{{ (mph | float * 1.60934) | round(1) }}`.
 
 Impacto en ET₀: despreciable (el término aerodinámico es una fracción
 pequeña del total). Queda anotado, pendiente de decidir si se corrige.
+
+
+### 7.2 `Value 126.7 is too large` y el factor del piranómetro desaparecido (v0.2.0)
+
+Al editar `esquema_meteo` para añadir la entrada por lux se usó una
+sustitución de texto sobre `"    CONF_FACTOR_RADIACION,\n"` con la intención
+de tocar solo la lista de imports. Esa cadena también es un subconjunto de
+la línea indentada a 16 espacios dentro de la función, así que el campo
+quedó como:
+
+```python
+vol.Required(
+    CONF_FACTOR_LUX,
+    CONF_FACTOR_RADIACION,      # <- pasa a ser el argumento `msg`
+    default=...,
+): _numero(0.5, 1.5, 0.01),
+```
+
+Es Python válido y voluptuous válido: el segundo posicional de un `Marker`
+es `msg`. Resultado: el campo «luxes por W/m²» heredó los límites del factor
+del piranómetro (0,5–1,5) y rechazaba su propio valor por defecto de 126,7,
+mientras que `factor_radiacion` desaparecía del formulario.
+
+La prueba existente no lo detectó porque solo comprobaba que el esquema
+serializara a JSON. Ahora se verifica además **el conjunto exacto de campos
+del paso** y que **el valor por defecto de cada campo numérico caiga dentro
+de su propio rango**, que es lo que habría cazado este fallo y el de §7.1 de
+una sola vez.
+
+Lección aplicable a este repo: editar Python con sustituciones de texto sin
+anclar la indentación completa es frágil. Si hay que hacerlo, incluir en el
+patrón la indentación real de la línea.
