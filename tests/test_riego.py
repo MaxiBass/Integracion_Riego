@@ -101,6 +101,43 @@ def test_et0() -> None:
     )
     comprobar(3.9 <= total <= 5.0, f"día real 12/09 integrado = {total:.2f} mm/día (climatología 3.9-4.5)")
 
+    # Presión estimada desde la altitud, FAO-56 Ec.7
+    comprobar(abs(et0.presion_desde_altitud(120.0) - 999.0) < 1.5,
+              f"presión estimada a 120 m = {et0.presion_desde_altitud(120.0):.1f} hPa")
+    comprobar(abs(et0.presion_desde_altitud(0.0) - 1013.0) < 0.5, "a nivel del mar = 1013 hPa")
+
+    # Elegir la presión relativa en vez de la absoluta mueve la ET₀ muy poco
+    # a esta altitud. Respalda lo que se le dijo al usuario.
+    comun = dict(
+        temperatura_c=27.0, humedad_pct=50.0, radiacion_wm2=325.15,
+        viento_ms=1.072 / 3.6,
+        momento=datetime(2026, 9, 13, 18, 2, 50, tzinfo=CEST),
+        latitud=LAT, longitud=LON, altitud_m=ALT, offset_utc_horas=2.0,
+    )
+    abs_ = et0.calcular(presion_hpa=1003.4, **comun).et0
+    rel_ = et0.calcular(presion_hpa=1017.7, **comun).et0
+    desvio = abs(rel_ - abs_) / abs_ * 100
+    comprobar(desvio < 0.5, f"absoluta vs relativa a 120 m: {desvio:.2f} % de diferencia (<0.5 %)")
+
+
+def test_irradiancia_desde_lux() -> None:
+    """Un sensor de lux debe poder sustituir al de radiación."""
+    from custom_components.riego import et0
+    from custom_components.riego.const import DEFECTO_FACTOR_LUX
+
+    print("\nIrradiancia a partir de iluminancia")
+
+    comun = dict(
+        temperatura_c=27.0, humedad_pct=50.0, viento_ms=0.3, presion_hpa=1003.4,
+        momento=datetime(2026, 9, 13, 18, 2, 50, tzinfo=CEST),
+        latitud=LAT, longitud=LON, altitud_m=ALT, offset_utc_horas=2.0,
+    )
+    directa = et0.calcular(radiacion_wm2=325.15, **comun).et0
+    # 325.15 W/m² son los 41197 lx que publica la propia estación
+    desde_lux = et0.calcular(radiacion_wm2=41196.5 / DEFECTO_FACTOR_LUX, **comun).et0
+    comprobar(casi(directa, desde_lux, 1e-4),
+              f"lux ÷ 126.7 reproduce la radiación ({directa:.4f} vs {desde_lux:.4f} mm/h)")
+
 
 # ── Flujo de configuración ────────────────────────────────────────────
 
@@ -126,7 +163,7 @@ def test_config_flow() -> None:
 
     meteo = {"sensor_temperatura": "sensor.t", "sensor_humedad": "sensor.h",
              "sensor_radiacion": "sensor.r", "altura_anemometro": 7.0,
-             "viento_minimo": 0.0, "factor_radiacion": 1.0}
+             "viento_minimo": 0.0, "factor_radiacion": 1.0, "factor_lux": 126.7}
     prev = {"forecast_tipo": "hourly", "forecast_horas": 24, "lluvia_prevista_umbral": 3.0,
             "lluvia_minima": 2.0, "lluvia_cap": 20.0, "temp_helada": 1.0}
     ciclo = {"modo_inicio": "fin_amanecer", "offset_amanecer_min": -35,
@@ -142,6 +179,15 @@ def test_config_flow() -> None:
         f.hass = MagicMock()
         f._async_current_entries = lambda **k: []
         serializable(await f.async_step_user(None), "paso user")
+
+        sin_luz = await f.async_step_user({k: v for k, v in meteo.items()
+                                           if k != "sensor_radiacion"})
+        comprobar(sin_luz.get("errors", {}).get("base") == "falta_irradiancia",
+                  "sin radiación ni lux se rechaza")
+        solo_lux = dict(meteo); solo_lux.pop("sensor_radiacion")
+        solo_lux["sensor_iluminancia"] = "sensor.lux"
+        serializable(await f.async_step_user(solo_lux), "solo con sensor de lux")
+
         serializable(await f.async_step_user(meteo), "paso previsión")
         serializable(await f.async_step_prevision(prev), "paso ciclo")
         serializable(await f.async_step_ciclo(ciclo), "paso zona")
@@ -323,6 +369,28 @@ def test_coordinador() -> None:
     comprobar(resumen["zonas"]["frutales"]["litros"] == 308, "en simulación sí se calculan los litros")
     comprobar(casi(c.deficit("frutales"), 0.0, 0.01), "en simulación el déficit también se descuenta")
 
+    # 5b. La irradiancia puede venir de un sensor de lux
+    c, hass = construir()
+    hass.states.set("sensor.rad", 325.15)
+    con_radiacion = c._et0_instantanea().et0
+    c, hass = construir(sensor_radiacion=None, sensor_iluminancia="sensor.lux",
+                        factor_lux=126.7)
+    hass.states.set("sensor.lux", 325.15 * 126.7)
+    con_lux = c._et0_instantanea().et0
+    comprobar(casi(con_radiacion, con_lux, 1e-6),
+              f"el coordinador acepta lux igual que W/m² ({con_lux:.4f} mm/h)")
+
+    # 5c. Sin sensor de presión se estima desde la altitud
+    c, hass = construir(sensor_presion="sensor.presion")
+    hass.states.set("sensor.presion", 1003.4)
+    hass.states.set("sensor.rad", 325.15)
+    con_sensor = c._et0_instantanea().et0
+    c, hass = construir()  # sin sensor_presion configurado
+    hass.states.set("sensor.rad", 325.15)
+    sin_sensor = c._et0_instantanea().et0
+    comprobar(abs(con_sensor - sin_sensor) / con_sensor < 0.01,
+              "sin barómetro, la estimación por altitud queda dentro del 1 %")
+
     # 6. Lluvia efectiva: por debajo del mínimo no cuenta; por encima, se descuenta
     c, hass = construir()
     hass.states.set("sensor.lluvia", 1.0)
@@ -366,6 +434,7 @@ def test_coordinador() -> None:
 
 if __name__ == "__main__":
     test_et0()
+    test_irradiancia_desde_lux()
     try:
         test_config_flow()
         test_coordinador()

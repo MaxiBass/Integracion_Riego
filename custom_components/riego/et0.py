@@ -105,6 +105,16 @@ def radiacion_extraterrestre_horaria(
     return max(ra, 0.0)
 
 
+def presion_desde_altitud(altitud_m: float) -> float:
+    """Presión atmosférica media en hPa a partir de la altitud (Ec. 7).
+
+    FAO-56 la ofrece como sustituto aceptable cuando no hay barómetro. El
+    valor que necesita la constante psicrométrica es la presión REAL del
+    emplazamiento (absoluta), no la reducida a nivel del mar.
+    """
+    return 1013.0 * (((293.0 - 0.0065 * altitud_m) / 293.0) ** 5.26)
+
+
 def presion_saturacion(t_c: float) -> float:
     """Presión de vapor a saturación en kPa (Ec. 11)."""
     return 0.6108 * math.exp((17.27 * t_c) / (t_c + 237.3))

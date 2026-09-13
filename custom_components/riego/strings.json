@@ -6,19 +6,26 @@
         "description": "Entradas del cálculo de ET₀ (Penman-Monteith FAO-56 horaria). Temperatura, humedad y radiación son obligatorias; sin viento ni presión el cálculo sigue funcionando con valores por defecto, pero pierde precisión.",
         "data": {
           "sensor_temperatura": "Temperatura exterior (°C)",
-          "sensor_humedad": "Humedad relativa (%)",
+          "sensor_humedad": "Humedad RELATIVA (%)",
           "sensor_radiacion": "Radiación solar (W/m²)",
           "sensor_viento": "Velocidad del viento",
-          "sensor_presion": "Presión atmosférica (hPa o kPa)",
+          "sensor_presion": "Presión atmosférica ABSOLUTA",
           "sensor_lluvia_24h": "Lluvia acumulada 24 h (mm)",
           "altura_anemometro": "Altura del anemómetro",
           "viento_minimo": "Viento mínimo para el cálculo",
-          "factor_radiacion": "Factor de calibración del piranómetro"
+          "factor_radiacion": "Factor de calibración del piranómetro",
+          "sensor_iluminancia": "…o sensor de iluminancia (lx)",
+          "factor_lux": "Luxes por W/m²"
         },
         "data_description": {
           "altura_anemometro": "Se usa para convertir la velocidad medida a la de 2 m que exige FAO-56.",
           "viento_minimo": "FAO-56 recomienda 0,5 m/s para que el término aerodinámico no se desplome con viento muy flojo. 0 desactiva el suelo mínimo.",
-          "factor_radiacion": "Multiplica la lectura del sensor. Bájalo si tu estación supera el máximo teórico de cielo despejado (típico en sensores que derivan W/m² de un lux-metro)."
+          "factor_radiacion": "Multiplica la lectura del sensor. Bájalo si tu estación supera el máximo teórico de cielo despejado (típico en sensores que derivan W/m² de un lux-metro).",
+          "sensor_humedad": "Humedad relativa en %, no absoluta en g/m³. En las estaciones Ecowitt es el campo 'humidity'.",
+          "sensor_radiacion": "Indica este o el de iluminancia. Si tienes los dos, este tiene prioridad.",
+          "sensor_iluminancia": "Alternativa para sensores que solo dan lux. Ojo: si tu entidad de lux ya se calcula multiplicando la radiación por un factor, no es una medida independiente y da igual cuál elijas.",
+          "factor_lux": "Conversión de lux a W/m². 126,7 es el valor de las estaciones Ecowitt y el habitual para luz solar.",
+          "sensor_presion": "La ABSOLUTA (la del emplazamiento), no la relativa reducida a nivel del mar. En Ecowitt, 'baromabsin' y no 'baromrelin'. Si lo dejas vacío se estima a partir de la altitud configurada en Home Assistant."
         }
       },
       "prevision": {
@@ -95,7 +102,8 @@
       "kc_invalido": "Introduce exactamente 12 valores de Kc entre 0 y 3, separados por comas.",
       "nombre_requerido": "La zona necesita un nombre.",
       "topic_requerido": "La zona necesita un topic MQTT.",
-      "zona_duplicada": "Ya existe una zona con ese nombre."
+      "zona_duplicada": "Ya existe una zona con ese nombre.",
+      "falta_irradiancia": "Hace falta un sensor de radiación solar (W/m²) o uno de iluminancia (lx)."
     },
     "abort": {
       "single_instance_allowed": "Solo se admite una instancia de Riego; añade más zonas desde sus opciones."
@@ -116,14 +124,23 @@
         "title": "Sensores meteorológicos",
         "data": {
           "sensor_temperatura": "Temperatura exterior (°C)",
-          "sensor_humedad": "Humedad relativa (%)",
+          "sensor_humedad": "Humedad RELATIVA (%)",
           "sensor_radiacion": "Radiación solar (W/m²)",
           "sensor_viento": "Velocidad del viento",
-          "sensor_presion": "Presión atmosférica",
+          "sensor_presion": "Presión atmosférica ABSOLUTA",
           "sensor_lluvia_24h": "Lluvia acumulada 24 h (mm)",
           "altura_anemometro": "Altura del anemómetro",
           "viento_minimo": "Viento mínimo para el cálculo",
-          "factor_radiacion": "Factor de calibración del piranómetro"
+          "factor_radiacion": "Factor de calibración del piranómetro",
+          "sensor_iluminancia": "…o sensor de iluminancia (lx)",
+          "factor_lux": "Luxes por W/m²"
+        },
+        "data_description": {
+          "sensor_humedad": "Humedad relativa en %, no absoluta en g/m³. En las estaciones Ecowitt es el campo 'humidity'.",
+          "sensor_radiacion": "Indica este o el de iluminancia. Si tienes los dos, este tiene prioridad.",
+          "sensor_iluminancia": "Alternativa para sensores que solo dan lux. Ojo: si tu entidad de lux ya se calcula multiplicando la radiación por un factor, no es una medida independiente y da igual cuál elijas.",
+          "factor_lux": "Conversión de lux a W/m². 126,7 es el valor de las estaciones Ecowitt y el habitual para luz solar.",
+          "sensor_presion": "La ABSOLUTA (la del emplazamiento), no la relativa reducida a nivel del mar. En Ecowitt, 'baromabsin' y no 'baromrelin'. Si lo dejas vacío se estima a partir de la altitud configurada en Home Assistant."
         }
       },
       "prevision": {
@@ -182,7 +199,8 @@
       "kc_invalido": "Introduce exactamente 12 valores de Kc entre 0 y 3, separados por comas.",
       "nombre_requerido": "La zona necesita un nombre.",
       "topic_requerido": "La zona necesita un topic MQTT.",
-      "zona_duplicada": "Ya existe una zona con ese nombre."
+      "zona_duplicada": "Ya existe una zona con ese nombre.",
+      "falta_irradiancia": "Hace falta un sensor de radiación solar (W/m²) o uno de iluminancia (lx)."
     }
   },
   "selector": {
@@ -215,17 +233,32 @@
       "name": "Regar zona",
       "description": "Envía una dosis concreta a una zona, al margen del balance hídrico.",
       "fields": {
-        "zona": {"name": "Zona", "description": "Identificador o nombre de la zona."},
-        "litros": {"name": "Litros", "description": "Volumen a enviar."}
+        "zona": {
+          "name": "Zona",
+          "description": "Identificador o nombre de la zona."
+        },
+        "litros": {
+          "name": "Litros",
+          "description": "Volumen a enviar."
+        }
       }
     },
     "ajustar_deficit": {
       "name": "Ajustar déficit",
       "description": "Fija o corrige el déficit hídrico acumulado de una zona.",
       "fields": {
-        "zona": {"name": "Zona", "description": "Identificador o nombre de la zona."},
-        "valor": {"name": "Valor (mm)", "description": "Déficit a fijar, o incremento si es relativo."},
-        "relativo": {"name": "Relativo", "description": "Sumar al déficit actual en lugar de sustituirlo."}
+        "zona": {
+          "name": "Zona",
+          "description": "Identificador o nombre de la zona."
+        },
+        "valor": {
+          "name": "Valor (mm)",
+          "description": "Déficit a fijar, o incremento si es relativo."
+        },
+        "relativo": {
+          "name": "Relativo",
+          "description": "Sumar al déficit actual en lugar de sustituirlo."
+        }
       }
     },
     "saltar_dia": {

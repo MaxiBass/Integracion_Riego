@@ -28,6 +28,7 @@ from .const import (
     CONF_ALTURA_ANEMOMETRO,
     CONF_DEFICIT_MAXIMO,
     CONF_DESFASE_ZONAS,
+    CONF_FACTOR_LUX,
     CONF_FACTOR_RADIACION,
     CONF_FORECAST_HORAS,
     CONF_FORECAST_TIPO,
@@ -41,6 +42,7 @@ from .const import (
     CONF_NOTIFY,
     CONF_OFFSET_AMANECER,
     CONF_SENSOR_HUMEDAD,
+    CONF_SENSOR_ILUMINANCIA,
     CONF_SENSOR_LLUVIA,
     CONF_SENSOR_PRESION,
     CONF_SENSOR_RADIACION,
@@ -55,6 +57,7 @@ from .const import (
     DEFECTO_CAUDAL,
     DEFECTO_DEFICIT_MAXIMO,
     DEFECTO_DESFASE_ZONAS,
+    DEFECTO_FACTOR_LUX,
     DEFECTO_FACTOR_RADIACION,
     DEFECTO_FACTOR_ZONA,
     DEFECTO_FORECAST_HORAS,
@@ -248,10 +251,21 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         temp = obtener(op[CONF_SENSOR_TEMP])
         hum = obtener(op[CONF_SENSOR_HUMEDAD])
-        rad = obtener(op[CONF_SENSOR_RADIACION])
-        if temp is None or hum is None or rad is None:
+        if temp is None or hum is None:
             return None
-        if any(s.state in ("unknown", "unavailable") for s in (temp, hum, rad)):
+        if any(s.state in ("unknown", "unavailable") for s in (temp, hum)):
+            return None
+
+        # Radiación: directa en W/m², o derivada de un sensor de iluminancia.
+        radiacion: float | None = None
+        if (ent := op.get(CONF_SENSOR_RADIACION)) and (estado := obtener(ent)):
+            if estado.state not in ("unknown", "unavailable"):
+                radiacion = _num(estado, 0.0)
+        if radiacion is None and (ent := op.get(CONF_SENSOR_ILUMINANCIA)):
+            if (estado := obtener(ent)) and estado.state not in ("unknown", "unavailable"):
+                factor = float(self._opt(CONF_FACTOR_LUX, DEFECTO_FACTOR_LUX))
+                radiacion = _num(estado, 0.0) / max(factor, 1.0)
+        if radiacion is None:
             return None
 
         viento_ms = 0.0
@@ -260,12 +274,14 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             unidad = estado.attributes.get("unit_of_measurement", "km/h")
             viento_ms = bruto / 3.6 if unidad in ("km/h", "kph") else bruto
 
-        presion = 1013.25
+        # Presión ABSOLUTA del emplazamiento, no la reducida a nivel del mar.
+        # Sin sensor se estima a partir de la altitud (FAO-56 Ec.7).
+        presion = et0_mod.presion_desde_altitud(float(self.hass.config.elevation or 0))
         if (ent := op.get(CONF_SENSOR_PRESION)) and (estado := obtener(ent)):
-            presion = _num(estado, 1013.25)
-            # Se acepta la presión tanto en hPa como en kPa
-            if presion < 200:
-                presion *= 10.0
+            if estado.state not in ("unknown", "unavailable"):
+                leida = _num(estado, presion)
+                # Se acepta tanto en hPa como en kPa
+                presion = leida * 10.0 if leida < 200 else leida
 
         ahora = dt_util.now()
         offset = ahora.utcoffset() or timedelta(0)
@@ -274,7 +290,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return et0_mod.calcular(
             temperatura_c=_num(temp, 20.0),
             humedad_pct=_num(hum, 50.0),
-            radiacion_wm2=_num(rad, 0.0) * factor_rad,
+            radiacion_wm2=radiacion * factor_rad,
             viento_ms=viento_ms,
             presion_hpa=presion,
             momento=ahora,
