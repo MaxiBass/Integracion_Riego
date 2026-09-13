@@ -219,7 +219,10 @@ def esquema_ciclo(valores: dict[str, Any]) -> vol.Schema:
                 CONF_DEFICIT_MAXIMO,
                 default=valores.get(CONF_DEFICIT_MAXIMO, DEFECTO_DEFICIT_MAXIMO),
             ): _numero(5, 200, 1, "mm"),
-            vol.Required(
+            # Optional, no Required: ha-form trata un booleano obligatorio con
+            # valor false como «campo sin rellenar» y bloquea el envío sin
+            # mostrar ningún error, de modo que desmarcarlo sería imposible.
+            vol.Optional(
                 CONF_SIMULACION, default=valores.get(CONF_SIMULACION, True)
             ): selector.BooleanSelector(),
             vol.Optional(

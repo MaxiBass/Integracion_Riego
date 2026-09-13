@@ -187,6 +187,25 @@ def test_config_flow() -> None:
                   f"{nombre}: el valor por defecto {defecto} cabe en "
                   f"[{num.get('min')}, {num.get('max')}]")
 
+    # Ningún esquema puede tener un booleano OBLIGATORIO: ha-form considera
+    # que un booleano required con valor false está «sin rellenar» y bloquea
+    # el botón de envío sin mostrar error. Fue lo que impidió terminar el
+    # alta en v0.2.1: la casilla «añadir otra zona», al desmarcarla, dejaba
+    # el formulario muerto.
+    from custom_components.riego import config_flow as cf_mod
+
+    obligatorios = []
+    for nombre, constructor in (("meteo", cf_mod.esquema_meteo),
+                                ("prevision", cf_mod.esquema_prevision),
+                                ("ciclo", cf_mod.esquema_ciclo),
+                                ("zona", cf_mod.esquema_zona)):
+        for campo in to_field_list(constructor({}), custom_serializer=cv.custom_serializer):
+            es_bool = campo.get("type") == "boolean" or "boolean" in campo.get("selector", {})
+            if es_bool and campo.get("required"):
+                obligatorios.append(f"{nombre}.{campo['name']}")
+    comprobar(not obligatorios,
+              f"ningún esquema tiene booleanos obligatorios (los hay en: {obligatorios})")
+
     meteo = {"sensor_temperatura": "sensor.t", "sensor_humedad": "sensor.h",
              "sensor_radiacion": "sensor.r", "altura_anemometro": 7.0,
              "viento_minimo": 0.0, "factor_radiacion": 1.0, "factor_lux": 126.7}
