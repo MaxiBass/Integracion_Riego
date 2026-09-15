@@ -162,6 +162,10 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._desuscriptores: list[Any] = []
         self._ciclo_en_curso = False
         self._proximo: datetime | None = None
+        # Id de registro del dispositivo "Balance Hídrico". Lo rellena
+        # async_setup_entry: las zonas lo necesitan para declararse como
+        # dispositivos hijos suyos.
+        self.id_dispositivo_sistema: str | None = None
 
     # ── Acceso a la configuración ─────────────────────────────────────
 

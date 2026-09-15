@@ -567,3 +567,21 @@ Sí salió de ahí un fallo propio: `riego-strategy.js` registraba la **misma
 clase** con dos nombres de custom element. El segundo `define()` lanza
 «this constructor has already been used with this registry» y aborta el
 módulo. Cada alias necesita su propia subclase.
+
+### 7.9 `via_device` obsoleto en el registro de dispositivos
+
+Home Assistant 2026.9 avisa en cada arranque de que la integración usa
+`via_device` —la tupla `(dominio, identificador)`— para enlazar cada zona con
+el dispositivo de sistema. Deja de funcionar en **2027.8**. El sustituto es
+`via_device_id`, que es el **id de registro** del dispositivo padre, una
+cadena, no una tupla.
+
+Eso obliga a que el dispositivo «Balance Hídrico» exista **antes** de que se
+creen las entidades de zona, cosa que antes no estaba garantizada: lo creaba
+la primera entidad de sistema que se añadiera. Ahora se crea explícitamente
+en `async_setup_entry`, antes de reenviar a las plataformas, y su id se
+guarda en `coordinador.id_dispositivo_sistema`.
+
+Si por lo que sea ese id no estuviera disponible, `info_zona` omite la clave
+en lugar de enlazar mal: la zona aparecería como dispositivo suelto, que es
+un fallo cosmético y no una excepción.

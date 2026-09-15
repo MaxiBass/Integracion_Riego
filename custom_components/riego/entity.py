@@ -23,14 +23,22 @@ def info_sistema() -> DeviceInfo:
     )
 
 
-def info_zona(zid: str, nombre: str) -> DeviceInfo:
-    return DeviceInfo(
+def info_zona(zid: str, nombre: str, id_sistema: str | None = None) -> DeviceInfo:
+    """Dispositivo de una zona, colgando del de sistema.
+
+    Desde HA 2026.9 el enlace al dispositivo padre se declara con
+    `via_device_id` (el id de registro, una cadena) y no con la tupla
+    `via_device`, que deja de funcionar en 2027.8.
+    """
+    info = DeviceInfo(
         identifiers={(DOMAIN, f"zona_{zid}")},
         name=f"Zona {nombre}",
         manufacturer="Riego",
         model="Zona de riego",
-        via_device=(DOMAIN, DISPOSITIVO_SISTEMA),
     )
+    if id_sistema:
+        info["via_device_id"] = id_sistema
+    return info
 
 
 class EntidadSistema(CoordinatorEntity[RiegoCoordinator]):
@@ -55,7 +63,9 @@ class EntidadZona(CoordinatorEntity[RiegoCoordinator]):
         self._zid = zid
         self._clave = clave
         self._attr_unique_id = f"{coordinador.entry.entry_id}_{zid}_{clave}"
-        self._attr_device_info = info_zona(zid, nombre)
+        self._attr_device_info = info_zona(
+            zid, nombre, coordinador.id_dispositivo_sistema
+        )
 
     @property
     def _zona(self) -> dict[str, Any]:

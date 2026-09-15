@@ -12,8 +12,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN, Z_ID
+from .entity import DISPOSITIVO_SISTEMA
 from .coordinator import RiegoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,6 +56,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Configura una entrada de la integración."""
     coordinador = RiegoCoordinator(hass, entry)
     await coordinador.async_iniciar()
+
+    # El dispositivo de sistema se crea aquí, antes que las plataformas, para
+    # que las zonas puedan colgar de él con via_device_id.
+    dispositivo = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, DISPOSITIVO_SISTEMA)},
+        name="Balance Hídrico",
+        manufacturer="Riego",
+        model="Balance hídrico FAO-56",
+    )
+    coordinador.id_dispositivo_sistema = dispositivo.id
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinador
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
