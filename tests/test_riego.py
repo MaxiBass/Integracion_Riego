@@ -367,7 +367,8 @@ def test_coordinador() -> None:
             "zonas": ZONAS, "desfase_zonas": 0, "simulacion": simulacion,
             "lluvia_minima": 2.0, "lluvia_cap": 20.0, "temp_helada": 1.0,
             "deficit_maximo": 50.0, "modo_inicio": "fin_amanecer",
-            "margen_duracion": 15, "hora_minima": "00:00:00", **extra,
+            "margen_duracion": 15, "hora_minima": "00:00:00",
+            "notify_entity": "notify.prueba", **extra,
         }
         entrada.options = {}
 
@@ -467,6 +468,20 @@ def test_coordinador() -> None:
     comprobar(resumen["zonas"]["frutales"]["litros"] == 308, "en simulación sí se calculan los litros")
     comprobar(casi(c.deficit("frutales"), 0.0, 0.01), "en simulación el déficit también se descuenta")
 
+    # El aviso de Telegram se rechazaba entero por los guiones bajos de
+    # "sin_riego": Telegram los lee como marca de cursiva y con un número
+    # impar devuelve "can't find end of the entity".
+    avisos = [ll for ll in hass.services.async_call.call_args_list
+              if ll.args[:2] == ("notify", "send_message")]
+    comprobar(bool(avisos), "en simulación se manda el aviso")
+    if avisos:
+        texto = avisos[-1].args[2]["message"]
+        malos = [ch for ch in "_*`[]" if ch in texto]
+        comprobar(not malos,
+                  f"el aviso no lleva marcas de Markdown (lleva: {malos})")
+        comprobar("sin riego" in texto or "simulado" in texto,
+                  "el aviso usa etiquetas legibles")
+
     # 5b. La irradiancia puede venir de un sensor de lux
     c, hass = construir()
     hass.states.set("sensor.rad", 325.15)
@@ -519,7 +534,8 @@ def test_coordinador() -> None:
          patch.object(mod.dt_util, "utcnow",
                       return_value=datetime(2026, 9, 14, 4, 35, tzinfo=timezone.utc)):
         c._planificar()
-    comprobar(c._proximo is None, "tras regar no se reprograma otro ciclo para el mismo amanecer")
+    comprobar(c._proximo is not None and c._proximo > amanecer,
+              "tras regar, el próximo ciclo estimado ya es el del amanecer siguiente")
 
     # 8b. Un ciclo lanzado a mano NO marca el amanecer como cumplido
     c, hass = construir()

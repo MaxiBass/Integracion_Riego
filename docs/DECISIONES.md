@@ -519,3 +519,51 @@ Déficit acumulado», que en una columna estrecha se trunca y no se lee.
 
 No hay forma de probar esto sin un navegador: la estrategia solo se ejecuta
 en el frontend. Se verificó abriendo el panel y comparando antes y después.
+
+### 7.6 Los avisos de Telegram no llegaban nunca (v0.3.0)
+
+Encontrado revisando el log tras el primer ciclo real:
+
+```
+telegram.error.BadRequest: Can't parse entities:
+can't find end of the entity starting at byte offset 198
+```
+
+El resumen de simulación incluye el resultado de cada zona en crudo:
+`sin_riego`. Telegram interpreta `_` como marca de cursiva, y tres guiones
+bajos —número impar— dejan la marca sin cerrar, así que **rechaza el mensaje
+entero**. Ningún aviso llegó desde la puesta en marcha.
+
+Corregido en dos capas: un diccionario de etiquetas legibles («sin riego» en
+vez de `sin_riego`) y un saneado final que neutraliza `_ * ` [ ]` en
+cualquier mensaje, venga de donde venga. Hay prueba que falla si un aviso
+vuelve a contener esos caracteres.
+
+### 7.7 «Próximo ciclo» se quedaba en desconocido tras regar
+
+Una vez ejecutado el ciclo del día, la guarda de §7.4 impide reprogramar y
+`_proximo` quedaba a `None`, de modo que el sensor mostraba «desconocido»
+hasta que el planificador entraba en la ventana del amanecer siguiente, unas
+veinte horas después. Ahora, cuando el ciclo ya está hecho, se estima el del
+día siguiente; el planificador lo afina luego con el déficit real.
+
+Detalle de proceso: el primer intento de este arreglo **no se aplicó** —la
+sustitución de texto buscaba un `else:` que no existía y no falló, solo no
+hizo nada—. Lo detectó la prueba. Desde entonces toda edición por sustitución
+lleva un `assert` de que el patrón aparece.
+
+### 7.8 Falsa alarma: los paneles en blanco
+
+Tras un reinicio, **todos** los paneles Lovelace de la instalación aparecían
+vacíos, incluidos los que no tienen nada que ver con esta integración. Se
+verificó que las configuraciones estaban intactas (`lovelace/config` devolvía
+las vistas correctas) y que `hui-panel-view` y `hui-sections-view` no
+llegaban a definirse: el navegador conservaba un `app.js` cacheado por el
+service worker que apuntaba a *chunks* de la versión anterior de Home
+Assistant. Se resolvió desregistrando el service worker y vaciando las cachés
+del navegador. No tenía relación con la integración.
+
+Sí salió de ahí un fallo propio: `riego-strategy.js` registraba la **misma
+clase** con dos nombres de custom element. El segundo `define()` lanza
+«this constructor has already been used with this registry» y aborta el
+módulo. Cada alias necesita su propia subclase.

@@ -108,6 +108,27 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Etiquetas legibles de cada resultado. Además de leerse mejor, evitan los
+# guiones bajos: Telegram interpreta "_" como marca de cursiva y rechaza el
+# mensaje entero si quedan desparejados ("can't find end of the entity").
+ETIQUETAS = {
+    "sin_riego": "sin riego",
+    "bloqueada": "bloqueada",
+    "regado": "regado",
+    "simulado": "simulado",
+    "helada": "helada",
+    "aplazado_lluvia": "aplazado por lluvia",
+    "completado": "completado",
+    "ya_en_curso": "ya en curso",
+}
+
+
+def _sin_marcas(texto: str) -> str:
+    """Neutraliza los caracteres que Telegram trata como Markdown."""
+    for caracter, reemplazo in (("_", " "), ("*", ""), ("`", "'"), ("[", "("), ("]", ")")):
+        texto = texto.replace(caracter, reemplazo)
+    return texto
+
 # Cuánto antes del amanecer se planifica el ciclo del día siguiente.
 VENTANA_PLANIFICACION = timedelta(hours=8)
 # Margen hacia atrás desde el amanecer dentro del cual un ciclo ya ejecutado
@@ -545,6 +566,12 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._cancelar_ciclo = async_track_point_in_utc_time(
                     self.hass, self._disparar_ciclo, inicio
                 )
+        else:
+            # Ya se regó para este amanecer. Se estima el del día siguiente
+            # para que el sensor no quede en «desconocido» durante horas; el
+            # planificador lo afinará al entrar en la ventana, con el déficit
+            # real de ese momento.
+            self._proximo = self._hora_inicio(amanecer + timedelta(days=1))
 
         # Replanificación al entrar en la ventana del amanecer siguiente, para
         # recalcular la hora de arranque con los volúmenes ya actualizados.
@@ -697,7 +724,8 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if simulacion:
             lineas = [
-                f"· {(self.zona(z) or {}).get(Z_NOMBRE, z)}: {d['litros']} L ({d['resultado']})"
+                f"· {(self.zona(z) or {}).get(Z_NOMBRE, z)}: {d['litros']} L "
+                f"({ETIQUETAS.get(d['resultado'], d['resultado'])})"
                 for z, d in resumen["zonas"].items()
             ]
             await self._avisar(
@@ -786,6 +814,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hass.bus.async_fire(EVENTO, {"tipo": tipo, **datos})
 
     async def _avisar(self, mensaje: str) -> None:
+        mensaje = _sin_marcas(mensaje)
         _LOGGER.info("Riego: %s", mensaje)
         destino = self.opciones.get(CONF_NOTIFY)
         if not destino:

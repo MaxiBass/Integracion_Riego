@@ -202,8 +202,13 @@ class EstrategiaRiego extends HTMLElement {
   }
 }
 
+// Un mismo constructor no puede registrarse con dos nombres: el segundo
+// define() lanza "this constructor has already been used with this registry"
+// y aborta el módulo. Cada alias necesita su propia subclase.
 for (const nombre of ["ll-strategy-dashboard-riego", "ll-strategy-dashboard-riego-strategy"]) {
-  if (!customElements.get(nombre)) customElements.define(nombre, EstrategiaRiego);
+  if (!customElements.get(nombre)) {
+    customElements.define(nombre, class extends EstrategiaRiego {});
+  }
 }
 
 console.info("%c RIEGO %c estrategia de panel cargada ", "background:#2e7d32;color:#fff", "");
