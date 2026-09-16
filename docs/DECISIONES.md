@@ -47,9 +47,29 @@ estación):
 | **Registrado por HA ese día** | **3,10** ← la réplica es fiel |
 | Fórmula corregida | **4,45** |
 
-**La ET₀ estaba subestimada un ~40 %.** El valor corregido cae justo en la
-climatología de Alicante para septiembre (3,9–4,5 mm/día), que es la mejor
-confirmación de que el arreglo es correcto.
+**La ET₀ estaba subestimada un ~40 % ese día.** El valor corregido cae justo
+en la climatología de Alicante para septiembre (3,9–4,5 mm/día), que es la
+mejor confirmación de que el arreglo es correcto.
+
+**Matiz importante, comprobado después (16/09/2026):** el error **no es un
+factor constante**, y decir «la ET₀ salía un 40 % baja» es una simplificación
+incorrecta. `γ` aparece en dos sitios con efectos opuestos: multiplica por 10
+el término aerodinámico y por ~3,3 el denominador. Con viento flojo manda el
+denominador y la fórmula vieja **subestima**; con viento fuerte manda el
+término aerodinámico y **sobrestima**.
+
+Verificado integrando días reales completos con las medias horarias de la
+estación:
+
+| Día | Viento | Vieja | Corregida | Factor |
+|---|---|---|---|---|
+| 12/09/2026 | flojo | 3,15 | 4,45 | ×1,41 |
+| 15/09/2026 | flojo | 2,58 | 4,34 | ×1,68 |
+| 20/08/2026 | con rachas nocturnas de 30 km/h | 4,68 | 4,52 | **×0,97** |
+
+Es decir, el sistema antiguo no regaba «poco»: regaba de forma **errática**,
+de menos los días calmados y de más los ventosos. Al pasar a riego real, el
+aumento será notable en días de calma y casi nulo en días de viento.
 
 Consecuencia práctica: el jardín llevaba tiempo recibiendo en torno al 70 %
 de la dosis FAO-56. Ver §4.3 sobre qué hacer con eso.
@@ -585,3 +605,26 @@ guarda en `coordinador.id_dispositivo_sistema`.
 Si por lo que sea ese id no estuviera disponible, `info_zona` omite la clave
 en lugar de enlazar mal: la zona aparecería como dispositivo suelto, que es
 un fallo cosmético y no una excepción.
+
+
+### 7.10 Los techos de seguridad aguantan el pico de verano
+
+Los techos (800 / 450 / 350 L) se fijaron con datos de septiembre, con la
+duda de si se quedarían cortos en agosto y volverían a racionar en silencio
+como hacía el sistema antiguo (§2.4). Comprobado con las medias horarias
+reales del 20/08/2026, el día más caluroso del registro (36,1 °C):
+
+| Zona | ETc | Litros | Techo | Margen |
+|---|---|---|---|---|
+| Frutales | 3,44 mm | 481 L | 800 | 40 % |
+| Aptenia | 2,94 mm | 235 L | 450 | 48 % |
+| Cipreses | 2,13 mm | 96 L | 350 | 73 % |
+
+Incluso forzando un día de pico climatológico de 6 mm/día —más de lo que ha
+registrado esta estación— Frutales pediría unos 640 L, todavía por debajo de
+los 800. **Los techos protegen sin racionar**, que es justo lo que se buscaba.
+
+Nota metodológica: la ET₀ que guarda el sistema antiguo corresponde al
+periodo amanecer−35 min → amanecer−35 min, no al día natural, así que los
+4,68 mm calculados aquí para el 20/08 no son directamente comparables con
+los 5,54 que registró ese día su `input_number`.
