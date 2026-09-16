@@ -36,6 +36,9 @@ class DescripcionNumero(NumberEntityDescription):
     defecto: float
 
 
+# Los rangos se mantienen ajustados a lo verosímil: un rango enorme deja el
+# deslizable de la interfaz inservible para valores pequeños (un umbral de
+# 0,5 sobre 0-30 cae en el 1,6 % del recorrido).
 NUMEROS: tuple[DescripcionNumero, ...] = (
     DescripcionNumero(
         key="superficie",
@@ -43,7 +46,7 @@ NUMEROS: tuple[DescripcionNumero, ...] = (
         icon="mdi:ruler-square",
         native_unit_of_measurement="m²",
         native_min_value=1,
-        native_max_value=10000,
+        native_max_value=2000,
         native_step=1,
         mode=NumberMode.BOX,
         clave_zona=Z_M2,
@@ -55,7 +58,7 @@ NUMEROS: tuple[DescripcionNumero, ...] = (
         icon="mdi:water-alert",
         native_unit_of_measurement="mm",
         native_min_value=0.1,
-        native_max_value=30,
+        native_max_value=15,
         native_step=0.1,
         mode=NumberMode.BOX,
         clave_zona=Z_UMBRAL,
@@ -66,8 +69,8 @@ NUMEROS: tuple[DescripcionNumero, ...] = (
         name="Techo de seguridad",
         icon="mdi:water-off",
         native_unit_of_measurement="L",
-        native_min_value=10,
-        native_max_value=10000,
+        native_min_value=50,
+        native_max_value=2000,
         native_step=10,
         mode=NumberMode.BOX,
         clave_zona=Z_TECHO,
