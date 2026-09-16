@@ -529,9 +529,12 @@ cuatro secciones pero con dos fallos visibles:
   existe en Home Assistant; para un switch es `toggle`.
 - **La sección «Ajustes» vacía.** La tarjeta `entities` con los cuatro
   `number` sí se generaba con su contenido —comprobado ejecutando
-  `ll-strategy-dashboard-riego.generate()` en la propia página— pero una
-  tarjeta `entities` se colapsa dentro de una vista de tipo `sections`. Se
-  sustituye por un tile por número con `numeric-input`.
+  `ll-strategy-dashboard-riego.generate()` en la propia página—. Se atribuyó
+  a que una tarjeta `entities` se colapsa dentro de una vista `sections`.
+  **Ese diagnóstico era erróneo**: lo que fallaba era el renderizado completo
+  del frontend por caché obsoleta (§7.8). Verificado el 16/09: una tarjeta
+  `entities` funciona perfectamente dentro de una vista de secciones, y de
+  hecho es la única forma de teclear un número en lugar de arrastrar.
 
 Añadido de paso: los tiles muestran ahora el nombre sin el prefijo del
 dispositivo. Con `has_entity_name`, el `friendly_name` es «Zona Frutales
@@ -628,3 +631,27 @@ Nota metodológica: la ET₀ que guarda el sistema antiguo corresponde al
 periodo amanecer−35 min → amanecer−35 min, no al día natural, así que los
 4,68 mm calculados aquí para el 20/08 no son directamente comparables con
 los 5,54 que registró ese día su `input_number`.
+
+
+### 7.11 `style: "box"` no existe en la característica numeric-input
+
+Los cuatro ajustes por zona se pintaban como **deslizables** pese a pedir una
+caja. Los valores válidos de `style` en la característica `numeric-input` son
+`buttons` y `slider`, no `box`:
+
+```js
+getStubConfig(){ return { type:"numeric-input", style:"buttons" } }
+```
+
+Al pasar un valor desconocido, HA cae al deslizable. Con rangos amplios eso
+es inservible: un umbral de 0,5 sobre un recorrido de 0,1 a 30 deja el
+tirador pegado al extremo izquierdo.
+
+Solución en dos capas:
+
+- **Panel**: botones −/+ para Umbral y Coeficiente (pasos de 0,1 y 0,05, dos
+  o tres toques), y tarjeta `entities` para Superficie y Techo, donde el
+  valor se teclea.
+- **Integración**: rangos ajustados a lo verosímil (superficie 1–2000 m²,
+  umbral 0,1–15 mm, techo 50–2000 L) para que el deslizable siga siendo
+  usable donde HA lo imponga, como en la ventana de detalle del móvil.
