@@ -655,3 +655,87 @@ Solución en dos capas:
 - **Integración**: rangos ajustados a lo verosímil (superficie 1–2000 m²,
   umbral 0,1–15 mm, techo 50–2000 L) para que el deslizable siga siendo
   usable donde HA lo imponga, como en la ventana de detalle del móvil.
+
+
+### 7.12 La rejilla de una sección es de 12 × `column_span`, no de 12
+
+Al montar la vista Resumen, los medidores y las gráficas salían diminutos
+pese a pedir `columns: 4` y `columns: 6`, anchuras que en una tarjeta normal
+dan un tercio y la mitad.
+
+La causa: dentro de una vista de secciones, la rejilla de cada sección no
+tiene 12 columnas fijas, sino **12 por cada columna de la vista que la
+sección ocupa**. Con `column_span: 3` la rejilla es de 36, así que
+`columns: 4` es un noveno del ancho y no un tercio.
+
+```yaml
+sections:
+  - type: grid
+    column_span: 3      # la rejilla de esta sección tiene 36 columnas
+    cards:
+      - type: gauge
+        grid_options: { columns: 12 }   # un tercio del ancho
+```
+
+`columns: "full"` no se ve afectado: ocupa siempre la sección entera. Los
+anchos usados son 12 para los tres medidores, 18 para las dos gráficas de
+demanda y 6 para las seis tarjetas de válvula.
+
+La prueba `tests/test_estrategia.mjs` comprueba que ninguna tarjeta pida más
+columnas de las que tiene su sección.
+
+
+### 7.13 El panel, en dos vistas complementarias
+
+Una sola vista con las cuatro secciones obligaba a bajar por 63 tarjetas
+para responder «¿riega mañana y cuánto?». Ahora son dos:
+
+- **Resumen** — cabecera con el estado del próximo ciclo en texto (aplazado,
+  simulación o litros previstos), tabla de las tres zonas, medidores de
+  volumen previsto sobre el techo, barras de agua aplicada por día y por mes,
+  ET₀ y lluvia diarias, y la curva de ET₀ instantánea de 48 h.
+- **Detalle** — una sección por zona con todos los números, los ajustes y,
+  al final, el histórico y el estado de la válvula.
+
+Dos elecciones de datos que importan:
+
+- Las barras de litros salen de `litros de la temporada`, que es
+  `total_increasing`, con `stat_types: [change]` y `period: day`. Al ser
+  estadística de largo plazo **no la purga el recorder**, a diferencia del
+  histórico de estados. Un `history-graph` del déficit no sirve para esto.
+- La ET₀ diaria sale de `ET₀ del periodo anterior` con `stat_types: [max]`,
+  no de la acumulada: la acumulada se reinicia a mitad de la madrugada, así
+  que su máximo diario no cubre un periodo completo.
+
+
+### 7.14 Falsa alarma: los litros del 15 y el 16 de septiembre son simulados
+
+Al revisar el primer ciclo con el sistema nuevo, los números no cuadraban:
+la integración apuntaba 433 L a Frutales el 16/09 y la válvula solo declaraba
+239 L. Las tres zonas mostraban la misma proporción, en torno al 55 %, lo que
+parecía un truncamiento en algún punto entre la integración y el dispositivo.
+
+No lo era. El historial lo aclara:
+
+| | 15/09 | 16/09 | 17/09 |
+|:--|:--|:--|:--|
+| Modo simulación | activo | activo hasta 15:33 | apagado |
+| Automatización antigua | activa | activa hasta 15:33 | apagada |
+| Riego real de la válvula | 07:07 | 07:08 | ninguno |
+| Orden de la integración | 05:57 | 05:59 | aplazada |
+
+Las 07:07–07:08 son exactamente amanecer−35 min: **regó el sistema antiguo**.
+La integración estaba en simulación y no llegó a publicar nada por MQTT. El
+primer ciclo real del sistema nuevo será el primero que no se aplace.
+
+La consecuencia que sí importa: en simulación el coordinador **sí** suma los
+litros a `litros_temporada` y **sí** consume el déficit, aunque no salga agua.
+Los 873 L de Frutales, 386 de Aptenia y 174 de Cipreses que acumula la
+temporada son, por tanto, agua que nunca pasó por un gotero, y las dos
+primeras barras del gráfico de litros por día son simuladas.
+
+Es discutible que la simulación toque los contadores. A favor: mantiene el
+déficit realista día a día, que es lo que se quería observar durante la
+prueba. En contra: contamina el total de la temporada y su estadística de
+largo plazo. Queda como decisión abierta; el servicio de reinicio de
+temporada permite dejar los contadores a cero cuando se quiera.

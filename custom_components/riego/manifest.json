@@ -1,14 +1,23 @@
 {
   "domain": "riego",
   "name": "Riego por Balance Hídrico",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Riego por balance hídrico FAO-56: ET₀ Penman-Monteith horaria, déficit acumulado por zona y dosificación volumétrica sobre electroválvulas Zigbee.",
   "documentation": "https://github.com/MaxiBass/Integracion_Riego",
   "issue_tracker": "https://github.com/MaxiBass/Integracion_Riego/issues",
   "requirements": [],
-  "dependencies": ["mqtt", "http", "frontend"],
-  "after_dependencies": ["sun", "notify"],
-  "codeowners": ["@MaxiBass"],
+  "dependencies": [
+    "mqtt",
+    "http",
+    "frontend"
+  ],
+  "after_dependencies": [
+    "sun",
+    "notify"
+  ],
+  "codeowners": [
+    "@MaxiBass"
+  ],
   "iot_class": "local_polling",
   "config_flow": true,
   "integration_type": "hub"
