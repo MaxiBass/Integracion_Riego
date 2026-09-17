@@ -80,7 +80,13 @@ porque no había forma de verificarlo antes. Ahora sí la hay:
 python3 -m venv /tmp/hav
 /tmp/hav/bin/pip install homeassistant==2026.9.2 paho-mqtt
 /tmp/hav/bin/python tests/test_riego.py
+node tests/test_estrategia.mjs
 ```
+
+El segundo no necesita el venv: ejecuta la estrategia de panel con un
+`hass` sintético y comprueba las tarjetas que genera. Existe porque un
+fallo ahí no se ve — una tarjeta con una opción inválida se pinta sin
+error pero deja el control inservible.
 
 Dos trampas de HA 2026.9 que costaron un rato:
 
