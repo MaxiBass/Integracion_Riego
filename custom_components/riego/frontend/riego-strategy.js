@@ -153,7 +153,9 @@ function plantillaResumen(zonas) {
 No se enviará agua a las válvulas.
 {% elif is_state('BINARY_APLAZADO','on') %}### 🌧️ Ciclo aplazado por lluvia prevista
 El déficit se conserva para el próximo ciclo.
-{% else %}### 💧 {{ ns.total }} L previstos
+{% elif ns.total > 0 %}### 💧 {{ ns.total }} L previstos
+{% else %}### 🌱 Sin riego pendiente
+El déficit se está acumulando para el próximo ciclo.
 {% endif %}
 {% if prox not in ['unknown','unavailable','none','None'] -%}
 **Próximo ciclo:** {{ dias[(prox | as_datetime | as_local).weekday()] }} {{ prox | as_timestamp | timestamp_custom('%d/%m a las %H:%M') }} · dentro de {{ ((prox | as_timestamp - now().timestamp()) / 3600) | round(1) }} h
@@ -177,6 +179,46 @@ lluvia efectiva **{{ states('SENSOR_LLUVIA') }} mm**
 ⏸️ {{ nom }} deshabilitada
 {% endif -%}
 {%- endfor %}`;
+}
+
+function plantillaUltimoRiego(zonas, sensorCiclo) {
+  const filas = zonas
+    .map(({ nombre, entidades }) => {
+      const litros = porSufijo(entidades, "litros_del_ultimo_ciclo") || "";
+      const cuando = porSufijo(entidades, "ultimo_riego") || "";
+      return `('${etiquetaZona(nombre).replace(/'/g, "")}','${litros}','${cuando}')`;
+    })
+    .join(",");
+
+  return `{%- set zonas = [${filas}] -%}
+{%- set ciclo = states('${sensorCiclo}') -%}
+{%- set dias = ['lunes','martes','miércoles','jueves','viernes','sábado','domingo'] -%}
+{%- set ns = namespace(total=0, regadas=0) -%}
+{%- for nom, lit, cua in zonas -%}
+{%- set dentro = ciclo | as_timestamp(0) > 0 and states(cua) | as_timestamp(0) > 0 and (states(cua) | as_timestamp - ciclo | as_timestamp) | abs < 3600 -%}
+{%- if dentro and states(lit) | float(0) > 0 -%}
+{%- set ns.total = ns.total + states(lit) | float(0) -%}
+{%- set ns.regadas = ns.regadas + 1 -%}
+{%- endif -%}
+{%- endfor -%}
+{% if ns.regadas == 0 %}### 🌙 Sin riego en el último ciclo
+{% else %}### 🚿 {{ ns.total | round | int }} L aplicados en {{ ns.regadas }} zona{{ 's' if ns.regadas > 1 }}
+{% endif %}
+{% if ciclo | as_timestamp(0) > 0 -%}
+{{ dias[(ciclo | as_datetime | as_local).weekday()] }} {{ ciclo | as_timestamp | timestamp_custom('%d/%m a las %H:%M') }} · hace {{ ((now().timestamp() - ciclo | as_timestamp) / 3600) | round(1) }} h
+{%- endif %}
+
+| Zona | Aplicado | Hora |
+|:--|--:|--:|
+{% for nom, lit, cua in zonas -%}
+{%- set dentro = ciclo | as_timestamp(0) > 0 and states(cua) | as_timestamp(0) > 0 and (states(cua) | as_timestamp - ciclo | as_timestamp) | abs < 3600 -%}
+{%- if dentro and states(lit) | float(0) > 0 -%}
+| {{ nom }} | {{ states(lit) | round | int }} L | {{ states(cua) | as_timestamp | timestamp_custom('%H:%M') }} |
+{% else -%}
+| {{ nom }} | — | |
+{% endif -%}
+{% endfor -%}
+{% if ns.regadas > 0 %}| **Total** | **{{ ns.total | round | int }} L** | |{% endif %}`;
 }
 
 function vistaResumen(hass, sistema, zonas) {
@@ -205,6 +247,22 @@ function vistaResumen(hass, sistema, zonas) {
       ],
     },
   ];
+
+  const sensorCiclo = s("ultimo_ciclo");
+  if (sensorCiclo && zonas.length) {
+    secciones.push({
+      type: "grid",
+      column_span: 3,
+      cards: [
+        encabezado("Último riego", "mdi:history", "subtitle", [sensorCiclo]),
+        {
+          type: "markdown",
+          grid_options: LLENO,
+          content: plantillaUltimoRiego(zonas, sensorCiclo),
+        },
+      ],
+    });
+  }
 
   // Medidores: volumen previsto sobre el techo de seguridad de cada zona.
   const medidores = [];
