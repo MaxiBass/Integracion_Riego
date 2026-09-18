@@ -739,3 +739,51 @@ déficit realista día a día, que es lo que se quería observar durante la
 prueba. En contra: contamina el total de la temporada y su estadística de
 largo plazo. Queda como decisión abierta; el servicio de reinicio de
 temporada permite dejar los contadores a cero cuando se quiera.
+
+
+### 7.15 El primer ciclo real: pedido y entregado coinciden al litro
+
+18/09/2026, 05:15. Primer ciclo que el sistema nuevo ejecuta de verdad —los
+del 15 y 16 fueron simulados (§7.14) y el del 17 se aplazó por lluvia
+prevista que luego no cayó.
+
+| Zona | Pedido | Entregado | Tiempo | Caudal |
+|:--|--:|--:|--:|--:|
+| Frutales | 655 L | 655 L | 139 min | 283 L/h |
+| Aptenia | 290 L | 290 L | 60 min | 290 L/h |
+| Cipreses | 130 L | 130 L | 28 min | 278 L/h |
+| **Total** | | **1075 L** | **227 min** | |
+
+Los caudales medidos coinciden con los aprendidos (291,6 / 294,3 / 282,5
+L/h), y ninguna zona tocó su techo pese a acumular dos periodos por el
+aplazamiento: Frutales pidió 655 de 800.
+
+Esto cierra definitivamente la falsa alarma de §7.14: la válvula ejecuta la
+dosis volumétrica que se le manda, sin truncarla.
+
+Un detalle del gráfico de caudal: al abrir, las válvulas declaran un pico
+instantáneo de más de 1.300 L/h que aplasta la escala. El `history-graph`
+del panel fija `max_y_axis: 400` con `fit_y_data: false` para que se vean
+las mesetas reales de ~280 L/h en lugar de una línea pegada al cero.
+
+
+### 7.16 «Último riego» en el panel, y lo que la estrategia no puede saber
+
+El Resumen lleva ahora una sección con lo aplicado en el último ciclo: total,
+hora, y una tabla por zona con litros, tiempo, caudal medio y una marca de
+verificación que compara lo que pidió la integración con lo que declara la
+válvula.
+
+Esa última columna **solo existe en el panel montado a mano**. La estrategia
+descubre entidades filtrando por `platform === "riego"`, y el volumen que
+confirma la válvula pertenece a Zigbee2MQTT. La versión que genera la
+estrategia se queda en zona, litros y hora, que sale de sus propios sensores.
+
+Para cerrar esa brecha habría que dejar configurar por zona la entidad de
+volumen de la válvula y publicar un sensor «litros entregados» propio. No
+está hecho.
+
+La tabla se ancla al sensor «último ciclo» y solo cuenta una zona si su
+«último riego» cae dentro de la hora siguiente al ciclo. Sin ese anclaje, una
+zona que no regó hoy mostraría los litros de su último riego, de otro día,
+como si fueran de este ciclo.

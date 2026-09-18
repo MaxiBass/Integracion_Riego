@@ -223,6 +223,29 @@ for (const nombre of Object.values(ZONAS)) {
   assert.ok(markdown.content.includes(`'${nombre}'`), `${nombre} falta en la tabla`);
 }
 
+// 5b. La segunda tarjeta de texto resume el último riego.
+const [cabecera, ultimo] = [...tarjetas(resumen)].filter((c) => c.type === "markdown");
+assert.ok(ultimo, "falta la tarjeta de último riego");
+assert.ok(!ultimo.content.includes("''"), "hay un states('') en el último riego");
+for (const zid of Object.keys(ZONAS)) {
+  for (const sufijo of ["litros_del_ultimo_ciclo", "ultimo_riego"]) {
+    assert.ok(
+      ultimo.content.includes(`sensor.zona_${zid}_${sufijo}`),
+      `el último riego no usa ${sufijo} de ${zid}`
+    );
+  }
+}
+assert.ok(
+  ultimo.content.includes("sensor.balance_hidrico_ultimo_ciclo"),
+  "el último riego debe anclarse al ciclo, o mostraría riegos de días previos"
+);
+
+// 5c. Con el déficit a cero la cabecera no debe anunciar "0 L previstos".
+assert.ok(
+  cabecera.content.includes("Sin riego pendiente"),
+  "falta la rama de la cabecera para cuando no hay nada que regar"
+);
+
 // 6. El orden de los sensores de zona es el previsto, no el alfabético.
 const seccionFrutales = detalle.sections.find((s) =>
   s.cards.some((c) => c.heading === "Zona Frutales")
