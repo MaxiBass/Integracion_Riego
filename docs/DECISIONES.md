@@ -787,3 +787,46 @@ La tabla se ancla al sensor «último ciclo» y solo cuenta una zona si su
 «último riego» cae dentro de la hora siguiente al ciclo. Sin ese anclaje, una
 zona que no regó hoy mostraría los litros de su último riego, de otro día,
 como si fueran de este ciclo.
+
+
+### 7.17 Los vigilantes de Telegram avisaban de un riego normal
+
+Las dos automatizaciones de vigilancia sobrevivieron al corte del 16/09 sin
+revisarse, y sus umbrales seguían calibrados para el sistema antiguo. El
+ciclo del 18/09 —perfectamente normal— disparó **dos alertas falsas** en
+Frutales:
+
+- `numeric_state above 505` sobre el volumen en tiempo real. Los 505 venían
+  del techo antiguo de Frutales, que eran 500 L. El techo actual son 800 y
+  ese día se aplicaron 655, así que el contador cruzó el umbral mientras
+  regaba con normalidad.
+- `switch.riego_frutales to "on" for 2 h`. La válvula estuvo abierta 2 h 19
+  min (03:15→05:35 UTC), que es lo que tarda en soltar 655 L a 283 L/h.
+
+Y un tercer fallo, este independiente de los techos: el disparador de estado
+llevaba `not_from: [unknown, unavailable]` pero no `not_to`. Filtra el estado
+de origen, no el de destino, así que **cada reinicio de Home Assistant**
+mandaba «⚠️ Estado: unavailable» por cada válvula. Ocurrió el 19/09 a las
+12:19 y a las 12:29.
+
+Umbrales nuevos, derivados del techo de cada zona y del caudal aprendido
+(~285 L/h), en lugar de un único número para las tres:
+
+| Zona | Techo | Volumen avisa | Tiempo máximo real | Tiempo avisa |
+|:--|--:|--:|--:|--:|
+| Frutales | 800 L | 850 L | 2 h 49 | 3 h 15 |
+| Aptenia | 450 L | 500 L | 1 h 32 | 2 h 00 |
+| Cipreses | 350 L | 400 L | 1 h 14 | 1 h 45 |
+
+**Si cambias un techo en la integración, hay que revisar el umbral de esa
+zona en la automatización.** Es un acoplamiento incómodo pero explícito: la
+alternativa, leer el `number.zona_*_techo_de_seguridad` desde el disparador,
+no es posible en un `numeric_state` con umbral dinámico sin recurrir a una
+plantilla por zona.
+
+En el vigilante de caudal la banda 150–450 L/h estaba bien —los tres caudales
+rondan los 285— y los 40 s de anomalía sostenida ya absorbían el pico de
+apertura de más de 1.300 L/h. El único cambio real: el aviso de caudal bajo
+exigía antes nada, y ahora exige que la válvula esté abierta. Un caudal con
+la válvula cerrada no es una obstrucción sino una válvula que no cierra, y
+ahora tiene su propio mensaje.
