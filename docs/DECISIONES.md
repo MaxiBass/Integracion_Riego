@@ -879,3 +879,43 @@ solo una vez al día: es el momento en que la válvula realmente decide, y
 recalcularlo en cada refresco (cada minuto) no cambiaría cuándo riega, solo
 complicaría el código para mover el problema del panel al backend. El punto
 correcto para arreglar esto era la vista, no el dato.
+
+
+### 7.19 v0.3.6 dejó la mitad del panel sin arreglar, y el arreglo tenía un bug propio
+
+Maxi, tras desplegar v0.3.6: *«sigo viendo todo a 0»*.
+
+Dos fallos, uno detrás de otro:
+
+**1. Arreglé solo la mitad del panel.** §7.18 sustituyó los tres `gauge` de
+la sección «Previsto para el próximo ciclo» por una proyección en vivo, pero
+la **cabecera** de encima —el titular grande y la tabla Zona/Estado/Déficit/
+Previsto, que es literalmente donde sale el texto «Sin riego pendiente» que
+Maxi citó en la queja original— seguía sumando `volumen_objetivo`
+(congelado) exactamente igual que antes. Con el umbral en 0,5 mm esa suma
+es 0 casi todo el día, así que la cabecera seguía anunciando «sin riego
+pendiente» justo encima de una sección que ya decía 648 L. Un panel
+contradiciéndose a sí mismo.
+
+Arreglado con la misma fórmula de §7.18 (`deficit + et0_acumulada × Kc ×
+factor − lluvia`, capada a [0, techo]) aplicada también al titular y a la
+tabla, que ahora muestra «Déficit + hoy» en vez de «Déficit» a secas, para
+dejar claro que es una proyección y no el valor congelado del último ciclo.
+
+**2. El primer intento de arreglo tenía un bug de `.replace()`.** Los
+marcadores `SENSOR_ET0_ACUM` y `SENSOR_LLUVIA` pasan a usarse **dos veces**
+en la plantilla de la cabecera —una para la proyección en vivo, otra en la
+línea informativa de siempre—, y `vistaResumen()` los sustituía con
+`String.prototype.replace()`, que solo reemplaza la **primera** ocurrencia.
+La segunda se quedaba como el literal `SENSOR_ET0_ACUM` sin sustituir, y
+`states('SENSOR_ET0_ACUM')` en Home Assistant simplemente no existe →
+plantilla vacía → 0. Lo cazó `tests/test_estrategia.mjs` al añadir la
+comprobación (nueva, §5d) de que no quede ningún marcador `SENSOR_*` sin
+sustituir en la cabecera. Cambiados los ocho `.replace()` de la cadena a
+`.replaceAll()`.
+
+Lección para el propio proceso: verificar en el navegador *cada* sección que
+se toca, no solo la que se acaba de escribir. El 22/09 comprobé visualmente
+la sección «Previsto» y la di por buena sin bajar a mirar si la cabecera —a
+la que no había tocado ese día, pero que comparte el mismo problema de raíz—
+seguía diciendo lo contrario tres líneas más arriba.

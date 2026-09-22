@@ -279,6 +279,36 @@ assert.ok(
   "falta la rama de la cabecera para cuando no hay nada que regar"
 );
 
+// 5d. La cabecera usa la MISMA proyección en vivo que "Previsto" (§7.18):
+// nunca debe decidir su titular ni su tabla con volumen_objetivo, que se
+// congela nada más regar. Si esto falla, el panel puede volver a
+// contradecirse: arriba "sin riego pendiente", abajo litros previstos.
+assert.ok(
+  !cabecera.content.includes("volumen_objetivo"),
+  "la cabecera no debe usar el volumen_objetivo congelado"
+);
+assert.ok(
+  cabecera.content.includes("sensor.balance_hidrico_et0_acumulada_del_periodo") &&
+    cabecera.content.includes("sensor.balance_hidrico_lluvia_efectiva"),
+  "la cabecera debe proyectar con el ET₀ acumulado y la lluvia efectiva en vivo"
+);
+for (const zid of Object.keys(ZONAS)) {
+  for (const sufijo of ["deficit_acumulado", "superficie", "techo_de_seguridad"]) {
+    const prefijo = sufijo === "deficit_acumulado" ? "sensor" : "number";
+    assert.ok(
+      cabecera.content.includes(`${prefijo}.zona_${zid}_${sufijo}`),
+      `la cabecera no usa ${sufijo} de ${zid} para proyectar`
+    );
+  }
+}
+// Cada marcador SENSOR_ET0_ACUM / SENSOR_LLUVIA se usa dos veces en la
+// plantilla (proyección + línea informativa): un .replace() sin "All"
+// solo sustituye la primera y deja la segunda literal.
+assert.ok(
+  !cabecera.content.includes("SENSOR_"),
+  "quedó un marcador SENSOR_* sin sustituir en la cabecera"
+);
+
 // 6. El orden de los sensores de zona es el previsto, no el alfabético.
 const seccionFrutales = detalle.sections.find((s) =>
   s.cards.some((c) => c.heading === "Zona Frutales")

@@ -132,18 +132,33 @@ function plantillaResumen(zonas) {
     .map(({ nombre, entidades }) => {
       const e = (s) => porSufijo(entidades, s) || "";
       return `('${etiquetaZona(nombre).replace(/'/g, "")}','${e("estado")}',` +
-        `'${e("deficit_acumulado")}','${e("volumen_objetivo")}','${e("bloqueada")}',` +
-        `'${e("habilitada")}')`;
+        `'${e("deficit_acumulado")}','${e("superficie")}','${e("techo_de_seguridad")}',` +
+        `'${e("bloqueada")}','${e("habilitada")}')`;
     })
     .join(",");
 
+  // El titular y la tabla usan la MISMA proyección en vivo que
+  // plantillaPrevisto: sensor.zona_*_volumen_objetivo solo se recalcula una
+  // vez al día en el ciclo (§7.18 en DECISIONES.md) y se queda congelado casi
+  // siempre en 0 el resto de la jornada. Si esta cabecera usara ese valor
+  // mientras la sección "Previsto" de más abajo usa la proyección, el panel
+  // se contradice a sí mismo: arriba "sin riego pendiente", abajo litros.
   return `{%- set zonas = [${filas}] -%}
-{%- set ns = namespace(total=0) -%}
-{%- for nom, est, def, vol, blo, hab in zonas -%}
-{%- set ns.total = ns.total + states(vol) | int(0) -%}
-{%- endfor -%}
 {%- set prox = states('SENSOR_PROXIMO') -%}
 {%- set dias = ['lunes','martes','miércoles','jueves','viernes','sábado','domingo'] -%}
+{%- set et0p = states('SENSOR_ET0_ACUM') | float(0) -%}
+{%- set lluvia = states('SENSOR_LLUVIA') | float(0) -%}
+{%- set ns = namespace(total=0) -%}
+{%- for nom, est, def, m2s, tec, blo, hab in zonas -%}
+{%- set d = states(def) | float(0) -%}
+{%- set kc = state_attr(def, 'kc_mes') | float(0) -%}
+{%- set factor = state_attr(def, 'factor_zona') | float(1) -%}
+{%- set proy_mm = [d + et0p * kc * factor - lluvia, 0] | max -%}
+{%- set m2 = states(m2s) | float(0) -%}
+{%- set techo = states(tec) | float(1000) -%}
+{%- set proy_l = [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
+{%- set ns.total = ns.total + proy_l -%}
+{%- endfor -%}
 {% if is_state('SWITCH_SIM','on') %}### 🧪 Modo simulación activo
 No se enviará agua a las válvulas.
 {% elif is_state('BINARY_APLAZADO','on') %}### 🌧️ Ciclo aplazado por lluvia prevista
@@ -156,17 +171,24 @@ El déficit se está acumulando para el próximo ciclo.
 **Próximo ciclo:** {{ dias[(prox | as_datetime | as_local).weekday()] }} {{ prox | as_timestamp | timestamp_custom('%d/%m a las %H:%M') }} · dentro de {{ ((prox | as_timestamp - now().timestamp()) / 3600) | round(1) }} h
 {%- endif %}
 
-| Zona | Estado | Déficit | Previsto |
+| Zona | Estado | Déficit + hoy | Previsto |
 |:--|:--|--:|--:|
-{% for nom, est, def, vol, blo, hab in zonas -%}
-| {{ nom }} | {{ states(est) }} | {{ states(def) }} mm | {{ states(vol) }} L |
+{% for nom, est, def, m2s, tec, blo, hab in zonas -%}
+{%- set d = states(def) | float(0) -%}
+{%- set kc = state_attr(def, 'kc_mes') | float(0) -%}
+{%- set factor = state_attr(def, 'factor_zona') | float(1) -%}
+{%- set proy_mm = [d + et0p * kc * factor - lluvia, 0] | max -%}
+{%- set m2 = states(m2s) | float(0) -%}
+{%- set techo = states(tec) | float(1000) -%}
+{%- set proy_l = [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
+| {{ nom }} | {{ states(est) }} | {{ proy_mm | round(2) }} mm | {{ proy_l }} L |
 {% endfor -%}
 | **Total** | | | **{{ ns.total }} L** |
 
 ET₀ periodo anterior **{{ states('SENSOR_ET0_ANTERIOR') }} mm** ·
 acumulada **{{ states('SENSOR_ET0_ACUM') }} mm** ·
 lluvia efectiva **{{ states('SENSOR_LLUVIA') }} mm**
-{% for nom, est, def, vol, blo, hab in zonas -%}
+{% for nom, est, def, m2s, tec, blo, hab in zonas -%}
 {%- if blo and is_state(blo,'on') %}
 ⛔ {{ nom }} bloqueada — el riego se salta y el déficit se conserva
 {% endif -%}
@@ -255,12 +277,15 @@ function plantillaPrevisto(zonas, sensorEt0Acum, sensorLluvia) {
 function vistaResumen(sistema, zonas) {
   const s = (sufijo) => porSufijo(sistema, sufijo) || "";
   const contenido = plantillaResumen(zonas)
-    .replace("SENSOR_PROXIMO", s("proximo_ciclo"))
-    .replace("SWITCH_SIM", s("simulacion"))
-    .replace("BINARY_APLAZADO", s("aplazado_por_lluvia_prevista"))
-    .replace("SENSOR_ET0_ANTERIOR", s("et0_del_periodo_anterior"))
-    .replace("SENSOR_ET0_ACUM", s("et0_acumulada_del_periodo"))
-    .replace("SENSOR_LLUVIA", s("lluvia_efectiva"));
+    .replaceAll("SENSOR_PROXIMO", s("proximo_ciclo"))
+    .replaceAll("SWITCH_SIM", s("simulacion"))
+    .replaceAll("BINARY_APLAZADO", s("aplazado_por_lluvia_prevista"))
+    .replaceAll("SENSOR_ET0_ANTERIOR", s("et0_del_periodo_anterior"))
+    // ET0_ACUM y LLUVIA aparecen dos veces: una para la proyección en vivo,
+    // otra en la línea informativa de abajo. replace() solo sustituye la
+    // primera ocurrencia y dejaba el marcador literal en la segunda.
+    .replaceAll("SENSOR_ET0_ACUM", s("et0_acumulada_del_periodo"))
+    .replaceAll("SENSOR_LLUVIA", s("lluvia_efectiva"));
 
   const badges = [
     s("proximo_ciclo"),
