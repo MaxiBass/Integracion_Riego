@@ -830,3 +830,52 @@ apertura de más de 1.300 L/h. El único cambio real: el aviso de caudal bajo
 exigía antes nada, y ahora exige que la válvula esté abierta. Un caudal con
 la válvula cerrada no es una obstrucción sino una válvula que no cierra, y
 ahora tiene su propio mensaje.
+
+
+### 7.18 El déficit por zona solo se recalcula una vez al día — el panel mentía en vivo
+
+Maxi, 22/09: *«en el panel de riego veo absurdo lo de próximo ciclo, siempre
+pone sin riego pendiente y con todo a 0»*.
+
+No era un fallo del riego. `sensor.zona_*_deficit_acumulado` y
+`volumen_objetivo` solo se recalculan dentro de `_ejecutar_ciclo`, una vez al
+día, sobre amanecer −35 min. El resto de las 24 horas se quedan congelados
+en lo que quedó justo después del último riego.
+
+Con el umbral configurado —0,5 mm en las tres zonas, que es `DEFECTO_UMBRAL`
+sin más, prácticamente «cualquier déficit medible dispara»— y una ET₀ diaria
+de 3-4 mm con el factor en 1,0, el sistema riega **todos los días** y el
+déficit vuelve a ~0 nada más regar. Eso no es un error: es exactamente lo
+esperable en goteo con reposición íntegra (§4.2, §7 de la decisión del
+coeficiente). Pero significa que la tabla por zona se queda mostrando 0 mm /
+0 L durante prácticamente toda la jornada, mientras
+`sensor.balance_hidrico_et0_acumulada_del_periodo` —ese sí en vivo, se toca
+en cada refresco del coordinador— va subiendo por detrás sin que el panel lo
+refleje en la previsión por zona.
+
+Comprobado en directo el 22/09 a las 22:12: déficit por zona = 0,0 mm en las
+tres, «Sin riego pendiente» en la cabecera, y sin embargo la ET₀ acumulada
+del periodo marcaba 3,96 mm. Recalculando a mano con la misma fórmula que usa
+el coordinador (`deficit + et0_periodo × Kc × factor − lluvia`, capado a
+[0, techo]): Frutales 394 L, Aptenia 174 L, Cipreses 79 L — el riego que de
+hecho se aplicó horas después.
+
+**Solución: la sección «Previsto para el próximo ciclo» ya no muestra el
+volumen congelado.** Es una plantilla markdown que recalcula la proyección
+en vivo con los mismos datos que verá el ciclo real: el déficit almacenado
+más `et0_acumulada_del_periodo` (en vivo) por Kc y factor (leídos de los
+atributos `kc_mes`/`factor_zona` que ya expone `deficit_acumulado`, sin
+duplicar el cálculo en el frontend) menos la lluvia efectiva, con una barra
+de progreso de texto sobre el techo de cada zona.
+
+Se retiraron los tres `gauge` que apuntaban a `volumen_objetivo` —esa
+entidad sigue existiendo y sigue siendo correcta para lo que es: el volumen
+que *se aplicó* en el último ciclo ejecutado, no una previsión en vivo—.
+Usarla en un medidor bajo el título «Previsto» era el origen exacto de la
+confusión: parecía una previsión y era una foto fija de ayer.
+
+No se ha tocado el coordinador. El déficit sigue —y debe seguir— recalculándose
+solo una vez al día: es el momento en que la válvula realmente decide, y
+recalcularlo en cada refresco (cada minuto) no cambiaría cuándo riega, solo
+complicaría el código para mover el problema del panel al backend. El punto
+correcto para arreglar esto era la vista, no el dato.
