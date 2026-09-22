@@ -100,11 +100,6 @@ function etiquetaZona(nombre) {
   return nombre.replace(/^Zona\s+/i, "");
 }
 
-function numero(hass, entityId, porDefecto) {
-  const valor = parseFloat((hass.states[entityId] || {}).state);
-  return Number.isFinite(valor) ? valor : porDefecto;
-}
-
 const tarjeta = (entity, extra = {}) => ({ type: "tile", entity, ...extra });
 
 // El tile de un switch usa la caracteristica "toggle". "switch-toggle" no
@@ -221,7 +216,43 @@ function plantillaUltimoRiego(zonas, sensorCiclo) {
 {% if ns.regadas > 0 %}| **Total** | **{{ ns.total | round | int }} L** | |{% endif %}`;
 }
 
-function vistaResumen(hass, sistema, zonas) {
+function plantillaPrevisto(zonas, sensorEt0Acum, sensorLluvia) {
+  const filas = zonas
+    .map(({ nombre, entidades }) => {
+      const deficit = porSufijo(entidades, "deficit_acumulado") || "";
+      const umbral = porSufijo(entidades, "umbral_de_riego") || "";
+      const m2 = porSufijo(entidades, "superficie") || "";
+      const techo = porSufijo(entidades, "techo_de_seguridad") || "";
+      return `('${etiquetaZona(nombre).replace(/'/g, "")}','${deficit}','${umbral}','${m2}','${techo}')`;
+    })
+    .join(",");
+
+  return `{%- set zonas = [${filas}] -%}
+{%- set et0p = states('${sensorEt0Acum}') | float(0) -%}
+{%- set lluvia = states('${sensorLluvia}') | float(0) -%}
+
+**En vivo** · lo que llevaría cada zona si el ciclo se ejecutara ahora mismo
+(el ciclo real corre en el próximo amanecer, y hasta entonces la ET₀ sigue sumando)
+
+{% for nom, defi, umb, m2s, tec in zonas -%}
+{%- set d = states(defi) | float(0) -%}
+{%- set kc = state_attr(defi, 'kc_mes') | float(0) -%}
+{%- set factor = state_attr(defi, 'factor_zona') | float(1) -%}
+{%- set umbral = states(umb) | float(0.5) -%}
+{%- set m2 = states(m2s) | float(0) -%}
+{%- set techo = states(tec) | float(1000) -%}
+{%- set proy_mm = [d + et0p * kc * factor - lluvia, 0] | max -%}
+{%- set proy_l = [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
+{%- set pct = [(proy_l / [techo, 1] | max * 100) | round(0) | int, 100] | min -%}
+{%- set llenos = (pct / 10) | round(0, 'floor') | int -%}
+**💧 {{ nom }}** — {{ proy_mm | round(2) }} mm → **{{ proy_l }} L** de {{ techo | round | int }}
+\`{{ '█' * llenos }}{{ '░' * (10 - llenos) }}\` {{ pct }} %
+{% if d >= umbral %}✅ ya supera su umbral, regará en el próximo ciclo{% endif %}
+
+{% endfor %}`;
+}
+
+function vistaResumen(sistema, zonas) {
   const s = (sufijo) => porSufijo(sistema, sufijo) || "";
   const contenido = plantillaResumen(zonas)
     .replace("SENSOR_PROXIMO", s("proximo_ciclo"))
@@ -264,40 +295,23 @@ function vistaResumen(hass, sistema, zonas) {
     });
   }
 
-  // Medidores: volumen previsto sobre el techo de seguridad de cada zona.
-  const medidores = [];
-  const faltas = [];
-  for (const { nombre, entidades } of zonas) {
-    const volumen = porSufijo(entidades, "volumen_objetivo");
-    const techo = porSufijo(entidades, "techo_de_seguridad");
-    const falta = porSufijo(entidades, "falta_para_regar");
-    const ancho = { columns: Math.max(Math.floor(COLS / Math.max(zonas.length, 1)), 6) };
-    if (volumen) {
-      const maximo = techo ? numero(hass, techo, 1000) : 1000;
-      medidores.push({
-        type: "gauge",
-        entity: volumen,
-        name: etiquetaZona(nombre),
-        unit: "L",
-        min: 0,
-        max: maximo,
-        needle: true,
-        severity: { green: 0, yellow: Math.round(maximo * 0.7), red: Math.round(maximo * 0.9) },
-        grid_options: ancho,
-      });
-    }
-    if (falta) {
-      faltas.push(tarjeta(falta, { name: `${etiquetaZona(nombre)} · falta`, grid_options: ancho }));
-    }
-  }
-  if (medidores.length) {
+  // "Previsto para el próximo ciclo": una proyección EN VIVO, no el volumen
+  // objetivo de la integración, que solo se recalcula una vez al día en el
+  // ciclo (ver §7.18 en DECISIONES.md) y se queda congelado —casi siempre en
+  // 0, con umbrales bajos— durante toda la jornada siguiente.
+  const sensorEt0Acum = s("et0_acumulada_del_periodo");
+  const sensorLluvia = s("lluvia_efectiva");
+  if (sensorEt0Acum && sensorLluvia && zonas.length) {
     secciones.push({
       type: "grid",
       column_span: 3,
       cards: [
         encabezado("Previsto para el próximo ciclo", "mdi:water-outline", "subtitle"),
-        ...medidores,
-        ...faltas,
+        {
+          type: "markdown",
+          grid_options: LLENO,
+          content: plantillaPrevisto(zonas, sensorEt0Acum, sensorLluvia),
+        },
       ],
     });
   }
@@ -540,7 +554,7 @@ class EstrategiaRiego extends HTMLElement {
       sections: secciones,
     };
 
-    return { views: [vistaResumen(hass, sistema, zonas), detalle] };
+    return { views: [vistaResumen(sistema, zonas), detalle] };
   }
 }
 

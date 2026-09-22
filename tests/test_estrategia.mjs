@@ -193,16 +193,44 @@ for (const zid of Object.keys(ZONAS)) {
   }
 }
 
-// 4. Los medidores toman su máximo del techo real, no de un valor por defecto.
-const medidores = [...tarjetas(resumen)].filter((c) => c.type === "gauge");
-assert.equal(medidores.length, 3, "un medidor por zona");
-for (const g of medidores) {
-  const zid = g.entity.split("_")[1];
-  assert.equal(g.max, TECHOS[zid], `el medidor de ${zid} no usa su techo`);
-  assert.ok(g.severity.green < g.severity.yellow, "las bandas deben ir en orden");
-  assert.ok(g.severity.yellow < g.severity.red, "las bandas deben ir en orden");
-  assert.ok(g.min < g.max, "rango vacío");
+// 4. «Previsto» es una proyección EN VIVO (§7.18): usa el ET₀ acumulado del
+// sistema y el déficit/Kc/factor de cada zona, no el volumen_objetivo
+// congelado de la integración, que solo se recalcula una vez al día.
+const previsto = [...tarjetas(resumen)].find(
+  (c) => c.type === "markdown" && c.content.includes("En vivo")
+);
+assert.ok(previsto, "falta la tarjeta «Previsto para el próximo ciclo»");
+assert.ok(!previsto.content.includes("''"), "hay un states('') en el previsto");
+assert.ok(
+  previsto.content.includes("sensor.balance_hidrico_et0_acumulada_del_periodo"),
+  "el previsto no usa el ET₀ acumulado en vivo"
+);
+assert.ok(
+  previsto.content.includes("sensor.balance_hidrico_lluvia_efectiva"),
+  "el previsto no descuenta la lluvia efectiva"
+);
+for (const zid of Object.keys(ZONAS)) {
+  for (const sufijo of ["deficit_acumulado", "umbral_de_riego", "superficie", "techo_de_seguridad"]) {
+    const prefijo = sufijo === "umbral_de_riego" || sufijo === "superficie" || sufijo === "techo_de_seguridad"
+      ? "number"
+      : "sensor";
+    assert.ok(
+      previsto.content.includes(`${prefijo}.zona_${zid}_${sufijo}`),
+      `el previsto no usa ${sufijo} de ${zid}`
+    );
+  }
 }
+assert.ok(
+  previsto.content.includes("kc_mes") && previsto.content.includes("factor_zona"),
+  "el previsto debe leer kc_mes y factor_zona del sensor de déficit, no reinventar el cálculo"
+);
+// No debe quedar ningún medidor: mostraba volumen_objetivo, que se congela
+// nada más regar y se queda casi siempre en 0 con umbrales bajos.
+assert.equal(
+  [...tarjetas(resumen)].filter((c) => c.type === "gauge").length,
+  0,
+  "no deberían quedar tarjetas gauge en el Resumen"
+);
 
 // 5. La plantilla del markdown no deja marcadores sin sustituir y no
 //    llama a states('') por una entidad que no se encontró.
@@ -225,6 +253,11 @@ for (const nombre of Object.values(ZONAS)) {
 
 // 5b. La segunda tarjeta de texto resume el último riego.
 const [cabecera, ultimo] = [...tarjetas(resumen)].filter((c) => c.type === "markdown");
+assert.equal(
+  [...tarjetas(resumen)].filter((c) => c.type === "markdown").length,
+  3,
+  "se esperan tres tarjetas de texto: cabecera, último riego y previsto"
+);
 assert.ok(ultimo, "falta la tarjeta de último riego");
 assert.ok(!ultimo.content.includes("''"), "hay un states('') en el último riego");
 for (const zid of Object.keys(ZONAS)) {
