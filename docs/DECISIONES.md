@@ -919,3 +919,28 @@ se toca, no solo la que se acaba de escribir. El 22/09 comprobé visualmente
 la sección «Previsto» y la di por buena sin bajar a mirar si la cabecera —a
 la que no había tocado ese día, pero que comparte el mismo problema de raíz—
 seguía diciendo lo contrario tres líneas más arriba.
+
+
+### 7.20 Siete pruebas del coordinador dependían del mes en que se ejecutaban
+
+El 05/10 la suite dio 7 fallos que el 22/09 no daba, sin ningún cambio de
+código en medio: «Frutales: 3.10 × 0.71 × 140 m² = 273 L (esperado 308)», más
+los del techo, la helada, la zona bloqueada y la simulación.
+
+La cifra delataba la causa: 273 L = 3,10 × **0,63** × 140, y 0,63 es el Kc de
+octubre de Frutales (0,71 el de septiembre). `coordinador.kc()` lee el mes de
+`dt_util.now()`, que las pruebas no fijaban, mientras que los valores
+esperados estaban escritos con el Kc de septiembre. Pasaban hasta el 30/09 y
+fallaron desde el 01/10.
+
+No era un defecto del riego —usar el Kc del mes en curso es el comportamiento
+correcto— sino de la prueba, y se habría repetido cada vez que cambiase el Kc.
+
+`test_coordinador()` envuelve ahora el cuerpo (`_coordinador()`) con
+`dt_util.now` fijado al 14/09/2026 a mediodía, la misma fecha en que está
+anclado el amanecer simulado. Comprobado ejecutándolas el 05/10: 7 fallos
+antes y 91 pruebas en verde después, con el reloj real en octubre.
+
+Lección: una prueba que usa `dt_util.now()` indirectamente (aquí, vía `kc()`)
+necesita el reloj fijado igual que lo necesita `utcnow`; y un «todo en verde»
+no vale para el día siguiente si el resultado depende de la fecha.
