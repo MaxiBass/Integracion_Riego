@@ -944,3 +944,31 @@ antes y 91 pruebas en verde después, con el reloj real en octubre.
 Lección: una prueba que usa `dt_util.now()` indirectamente (aquí, vía `kc()`)
 necesita el reloj fijado igual que lo necesita `utcnow`; y un «todo en verde»
 no vale para el día siguiente si el resultado depende de la fecha.
+
+
+### 7.21 Icono de la integración: carpeta `brand/` dentro de la propia integración
+
+El icono que HA muestra en *Ajustes → Dispositivos y servicios* ya no sale del
+repositorio `home-assistant/brands` para las integraciones propias: HA 2026.x
+sirve `custom_components/<dominio>/brand/` (`components/brands`; la integración
+«tiene marca» si existe esa carpeta). Verificado leyendo el código de HA 2026.9.
+
+- Solo reconoce ocho nombres (`icon.png`, `logo.png`, sus `@2x` y las cuatro
+  variantes `dark_*`). **Cualquier otro lo ignora sin avisar**, de ahí que
+  `tests/test_riego.py::test_icono` cruce los nombres con `ALLOWED_IMAGES`, la
+  lista de la propia HA, en lugar de duplicarla y que se desincronice.
+- Con `icon.png` basta: HA tiene una cadena de reemplazos (`logo.png` →
+  `icon.png`, `icon@2x.png` → `icon.png`, `dark_icon.png` → `icon.png`…).
+  Pasando la carpeta por el resolvedor real de HA, las ocho peticiones
+  posibles se atienden desde ella y ninguna cae al CDN. Se entregan
+  `icon.png` (256×256) e `icon@2x.png` (512×512). Los `logo` usan el icono
+  como reemplazo; una versión apaisada con el nombre queda como mejora opcional.
+- Diseño: una gota de agua con un brote blanco sobre fondo transparente. El
+  azul se ve igual de bien en tema claro y en oscuro, así que no hay variantes
+  `dark_*`; sigue legible a 24 px.
+- Se genera con `tools/generar_icono.py` (Pillow) en vez de guardar solo el PNG:
+  así se puede retocar la forma sin perder el original. Dibuja a 2048 px y
+  reduce con LANCZOS para que los bordes salgan suaves sin librerías de SVG.
+- HA guarda en `hass.data` la lista de integraciones propias la primera vez que
+  la necesita y no la reescanea: el icono aparece tras actualizar desde HACS
+  **y reiniciar**, no antes.
