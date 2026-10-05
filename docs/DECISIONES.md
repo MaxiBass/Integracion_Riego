@@ -980,3 +980,46 @@ sirve `custom_components/<dominio>/brand/` (`components/brands`; la integración
 - HA guarda en `hass.data` la lista de integraciones propias la primera vez que
   la necesita y no la reescanea: el icono aparece tras actualizar desde HACS
   **y reiniciar**, no antes.
+
+
+### 7.22 El interruptor de la válvula puede mentir: falsa alarma del 27/09
+
+El 27/09 a las 16:30 el vigilante de Telegram avisó de que la válvula de
+Aptenia llevaba más de 2 h abierta. No era cierto: el caudal estuvo a 0 todo el
+tiempo. Cronología (hora local), reconstruida con el historial y el registro:
+
+- 06:25 — el ciclo abre Aptenia: `switch.riego_aptenia` y
+  `binary_sensor.riego_aptenia_valve_work_state` pasan a `on`.
+- 06:57 — termina el riego; la válvula se cierra sola y `valve_work_state`
+  pasa a `off`. **El interruptor no**: Zigbee2MQTT no publicó el cierre y HA lo
+  siguió viendo en `on`.
+- 14:29 — reinicio. Zigbee2MQTT republica el estado que tenía guardado, `on`, y
+  arranca de cero la cuenta de 2 h del vigilante.
+- 16:30:16 — salta el aviso. El desfase de exactamente 2 h con el regreso del
+  `on` tras el reinicio, coincidente al microsegundo, es lo que lo delató.
+- 16:30:46 — la válvula informa por fin `off`; el registro no muestra ningún
+  usuario detrás.
+
+En los ocho días siguientes no se ha repetido: interruptor y `valve_work_state`
+se encienden y apagan con cada riego. Pero ya se sabe que puede pasar.
+
+**La integración no se dejó engañar**: `coordinator._regando()` mira el caudal,
+no el interruptor, y la zona siguió en «acumulando» todo el día. El que se fiaba
+del interruptor era el vigilante, en dos sitios, y ambos se han cambiado:
+
+- **«Válvula abierta demasiado tiempo»** pasa a ser «**pasa agua** demasiado
+  tiempo»: `sensor.riego_*_flow` por encima de 1 L/h sostenido durante el mismo
+  tiempo de §7.17 (3 h 15 / 2 h / 1 h 45). Además de no fiarse del interruptor,
+  así detecta una válvula atascada aunque ella misma no lo sepa, que con el
+  interruptor era invisible: a caudal normal (~285 L/h) tampoco lo cazaba el
+  vigilante de caudal, cuya banda es 150–450.
+- **«Obstrucción» frente a «válvula que no cierra»** en el vigilante de caudal
+  ya no pregunta al interruptor sino a `valve_work_state`. Ahí no sirve el
+  caudal: es justo lo que se quiere clasificar.
+
+`valve_work_state` se eligió con datos, no por intuición: siguió exactamente
+cada riego de Aptenia (revisado del 27/09 al 05/10) y de Frutales (del 28/09
+al 05/10), incluido el del 01/10,
+cuando HA se reinició en mitad del riego de Frutales (07:28) y la válvula
+siguió sola hasta cerrarse a las 07:35 —buena prueba, de paso, del diseño
+«dispara y olvida» de §4.2—.
