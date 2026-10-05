@@ -38,26 +38,47 @@ cuando HACS instala la integración copia esa carpeta entera a
 `/config/custom_components/riego`, y no tiene sentido que la documentación
 de decisiones viaje a la instalación real de HA.
 
-## Qué sustituye esta integración
+## Estado actual: en producción desde el 16/09/2026
 
-El paquete YAML `packages/riego/` del HA de casa (helpers.yaml, mqtt.yaml,
-riego_et0.yaml, riego_sistema.yaml) más la automatización maestra
-«Riego — Ciclo diario al amanecer». **No se ha borrado nada**: la migración
-prevista es convivencia en modo simulación primero. El procedimiento
-completo está en `docs/DECISIONES.md` §5.
+Esta integración **riega de verdad**: sustituyó al paquete YAML antiguo
+`packages/riego/` y a la automatización «Riego — Ciclo diario al amanecer». El
+corte se hizo el 16/09/2026 a las 15:33 (se apagó la automatización antigua y
+el modo simulación) y después el sistema viejo se ha retirado por completo: el
+20/09 ya no existían el paquete, la automatización ni los helpers, y el 25/09
+tampoco el panel antiguo, las entidades huérfanas ni sus estadísticas.
 
-Mientras dure la convivencia, el sistema antiguo se pausa apagando **solo**
-`automation.riego_ciclo_diario_al_amanecer`. El resto del paquete es inerte.
+Consecuencias para quien edite esto:
+
+- **Un cambio en `coordinator.py` actúa sobre válvulas reales.** El modo
+  simulación está apagado. Para probar un cambio que toque el ciclo, o se
+  enciende `switch.balance_hidrico_modo_simulacion` o se prueba con los tests;
+  ojo, en simulación el coordinador sí suma a `litros_de_la_temporada` y
+  consume el déficit (`docs/DECISIONES.md` §7.14).
+- **No hay camino de vuelta dentro de HA.** Esta sesión no guardó copia de los
+  ficheros del paquete antiguo, y el respaldo automático del MCP no cubre
+  subcarpetas. El procedimiento de migración, ya histórico, está en §5.
+- **El riego manual por litros que daba `mqtt.yaml` ya no existe**
+  (`number.riego_*_litros`). Ahora se hace con el servicio `riego.regar_zona`.
+- **Dos automatizaciones de Telegram viven fuera de este repo**, en el
+  `automations.yaml` de HA: «Notificaciones Riego Telegram 1» y «Vigilancia de
+  caudal anómalo». Sus umbrales de volumen y de tiempo abierto se derivaron del
+  techo de cada zona: si cambias un techo, revísalos (§7.17).
 
 ## Contexto importante del cálculo
 
 La plantilla YAML original tenía un error de unidades en la constante
-psicrométrica (`P` en hPa donde FAO-56 pide kPa) que subestimaba la ET₀ un
-~40 %. Esta integración lo corrige, así que **los litros que propone son
-mayores que los del sistema antiguo**. El parámetro por zona
-`coeficiente de ajuste` existe justamente para decidir cuánto de esa
-corrección se aplica al riego real. Ver `docs/DECISIONES.md` §2.1 y §4.3
-antes de tocar nada de esto.
+psicrométrica (`P` en hPa donde FAO-56 pide kPa). **No es un factor
+constante**: infla ×10 el término aerodinámico y ×3,3 el denominador, así que
+la fórmula vieja subestimaba la ET₀ con viento flojo y la sobrestimaba con
+viento fuerte (×1,41 y ×1,68 en dos días de calma de septiembre, ×0,97 en un
+día ventoso de agosto). Decir «subestimaba un 40 %» o «riega un 70 % más» es
+incorrecto. Datos y razonamiento en `docs/DECISIONES.md` §2.1.
+
+El parámetro por zona `coeficiente de ajuste` está en **1,0** en las tres
+zonas (dosis FAO-56 íntegra): lo decidió Maxi antes del corte, es decisión
+suya y no técnica. Queda por revisar en abril/mayo de 2027 con una temporada
+completa, y por comprobar con pala (25–30 cm en el borde del bulbo húmedo de
+Frutales, 24 h después de un riego). Ver §4.3.
 
 ## Flujo para editar la integración
 

@@ -171,7 +171,7 @@ HA espere sería *menos* robusto, no más.
 El desfase entre zonas es configurable (por defecto 60 s) y no pretende
 secuenciar: solo escalona la apertura.
 
-### 4.3 Coeficiente de ajuste por zona — la decisión pendiente
+### 4.3 Coeficiente de ajuste por zona — decidido: 1,0
 
 Arreglar §2.1 hace que la ET₀ suba ~40 %, y con ella los litros. Frutales en
 septiembre pasaría de ~308 a ~435 L/día.
@@ -189,6 +189,14 @@ convertir a litros, con dos usos legítimos:
 Valor por defecto **1,0** (dosis FAO íntegra). Poner **0,70** reproduce
 aproximadamente el riego actual. La decisión se toma tras comparar en modo
 simulación, no antes.
+
+**Resuelto antes del corte del 16/09/2026: coeficiente 1,0 en las tres zonas**
+—dosis FAO-56 íntegra—, decisión de Maxi tras comparar en simulación. Queda
+por revisar en abril/mayo de 2027 con una temporada completa, y por comprobar
+con pala a 25–30 cm en el borde del bulbo húmedo de Frutales, 24 h después de
+un riego. El texto de arriba se deja como estaba para que conste el
+razonamiento; la cifra «~40 %» de su primer párrafo es la simplificación que
+§2.1 corrige (el error de γ no es un factor constante).
 
 ### 4.4 El riego manual NO descuenta del déficit
 
