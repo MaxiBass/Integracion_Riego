@@ -61,8 +61,12 @@ Consecuencias para quien edite esto:
   (`number.riego_*_litros`). Ahora se hace con el servicio `riego.regar_zona`.
 - **Dos automatizaciones de Telegram viven fuera de este repo**, en el
   `automations.yaml` de HA: «Notificaciones Riego Telegram 1» y «Vigilancia de
-  caudal anómalo». Sus umbrales de volumen y de tiempo abierto se derivaron del
-  techo de cada zona: si cambias un techo, revísalos (§7.17).
+  caudal anómalo». Sus umbrales de volumen y de tiempo pasando agua se derivaron
+  del techo de cada zona: si cambias un techo, revísalos (§7.17).
+- **No te fíes de `switch.riego_*` para saber si una válvula riega**: puede
+  quedarse en `on` horas después de cerrar (§7.22). Lo fiable es el caudal
+  (`sensor.riego_*_flow`, que es lo que usa la integración) o
+  `binary_sensor.riego_*_valve_work_state`, que informa la propia válvula.
 
 ## Contexto importante del cálculo
 
