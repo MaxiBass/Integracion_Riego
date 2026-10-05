@@ -323,6 +323,24 @@ def test_traducciones() -> None:
 
 
 def test_coordinador() -> None:
+    """Ejecuta _coordinador() con el reloj de Home Assistant fijado.
+
+    Las cifras esperadas (308 L en Frutales = 3,10 mm × Kc 0,71 × 140 m²) son
+    de septiembre, y el escenario está anclado al 14/09/2026. coordinador.kc()
+    lee el mes de dt_util.now(), así que sin fijarlo los tests dependían del
+    día en que se ejecutaban: pasaban hasta el 30/09 y fallaron siete a partir
+    del 1/10, cuando el Kc de Frutales baja de 0,71 a 0,63.
+    """
+    from unittest.mock import patch
+
+    from custom_components.riego import coordinator as mod
+
+    with patch.object(mod.dt_util, "now",
+                      return_value=datetime(2026, 9, 14, 12, 0, tzinfo=CEST)):
+        _coordinador()
+
+
+def _coordinador() -> None:
     from unittest.mock import AsyncMock, MagicMock, patch
 
     from homeassistant.core import State
