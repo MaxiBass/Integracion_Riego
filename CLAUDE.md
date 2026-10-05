@@ -26,6 +26,8 @@ da 404 incluso con GitHub autenticado).
 ```
 custom_components/riego/     manifest.json, __init__.py, coordinator.py, et0.py...
 custom_components/riego/frontend/riego-strategy.js   estrategia de panel
+custom_components/riego/brand/    icon.png e icon@2x.png: el icono de la integración
+tools/generar_icono.py       genera esos PNG (Pillow; el venv de pruebas ya lo trae)
 docs/DECISIONES.md           historial de decisiones, NO va en custom_components
 hacs.json
 README.md

@@ -319,6 +319,49 @@ def test_traducciones() -> None:
                   f"{nombre}: el paso final ofrece las dos opciones del menú")
 
 
+def test_icono() -> None:
+    """El icono de la integración está donde Home Assistant lo busca.
+
+    HA sirve custom_components/<dominio>/brand/ y solo reconoce ocho nombres de
+    fichero; cualquier otro lo ignora sin avisar. Un nombre mal escrito
+    (icon2x.png, Icon.png) dejaría la integración sin icono sin ningún error
+    ni mensaje en el registro, de ahí esta prueba.
+    """
+    import struct
+
+    print("\nIcono de la integración")
+    marca = RAIZ / "custom_components" / "riego" / "brand"
+    comprobar(marca.is_dir(), "existe custom_components/riego/brand/")
+    if not marca.is_dir():
+        return
+    nombres = {p.name for p in marca.iterdir()}
+    comprobar("icon.png" in nombres, "hay un icon.png")
+
+    try:
+        from homeassistant.components.brands.const import ALLOWED_IMAGES
+    except ImportError:
+        print("  (sin Home Assistant: no se comprueba que los nombres sean de los que HA reconoce)")
+    else:
+        sobran = sorted(nombres - ALLOWED_IMAGES)
+        comprobar(not sobran, f"todos los ficheros de brand/ tienen un nombre que HA reconoce (sobran {sobran})")
+
+    # Tamaños de las guías de marca de HA: 256 px el icono y 512 px el @2x.
+    lados = {"icon.png": 256, "icon@2x.png": 512}
+    for nombre, lado in lados.items():
+        ruta = marca / nombre
+        if not ruta.is_file():
+            continue
+        datos = ruta.read_bytes()
+        es_png = datos[:8] == b"\x89PNG\r\n\x1a\n"
+        comprobar(es_png, f"{nombre} es un PNG")
+        if not es_png:
+            continue
+        ancho, alto = struct.unpack(">II", datos[16:24])  # cabecera IHDR
+        comprobar((ancho, alto) == (lado, lado), f"{nombre} mide {lado}×{lado} (mide {ancho}×{alto})")
+        comprobar(datos[25] == 6, f"{nombre} es RGBA, con fondo transparente (tipo de color {datos[25]})")
+        comprobar(len(datos) < 100_000, f"{nombre} es ligero ({len(datos) // 1024} KB; HA lo sirve en cada petición)")
+
+
 # ── Coordinador ───────────────────────────────────────────────────────
 
 
@@ -581,6 +624,7 @@ if __name__ == "__main__":
     test_et0()
     test_irradiancia_desde_lux()
     test_traducciones()
+    test_icono()
     try:
         test_config_flow()
         test_coordinador()
