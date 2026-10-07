@@ -56,7 +56,6 @@ const SISTEMA = [
   "binary_sensor.balance_hidrico_aplazado_por_lluvia_prevista",
   "switch.balance_hidrico_modo_simulacion",
   "switch.balance_hidrico_saltar_el_proximo_riego",
-  "number.balance_hidrico_probabilidad_de_lluvia",
 ];
 
 const porZona = (z) => [
@@ -72,14 +71,9 @@ const porZona = (z) => [
   `binary_sensor.zona_${z}_bloqueada`,
   `binary_sensor.zona_${z}_regando`,
   `switch.zona_${z}_habilitada`,
-  `number.zona_${z}_superficie`,
-  `number.zona_${z}_umbral_de_riego`,
-  `number.zona_${z}_techo_de_seguridad`,
-  `number.zona_${z}_coeficiente_de_ajuste`,
 ];
 
 const ZONAS = { frutales: "Frutales", aptenia: "Aptenia", cipreses: "Cipreses" };
-const TECHOS = { frutales: 800, aptenia: 450, cipreses: 350 };
 
 const hass = { entities: {}, devices: {}, states: {} };
 
@@ -99,7 +93,6 @@ for (const [zid, nombre] of Object.entries(ZONAS)) {
   const dev = `dev_${zid}`;
   hass.devices[dev] = { name: `Zona ${nombre}` };
   for (const e of porZona(zid)) registrar(e, dev, `Zona ${nombre}`);
-  hass.states[`number.zona_${zid}_techo_de_seguridad`].state = String(TECHOS[zid]);
 }
 
 // Una entidad deshabilitada no debe aparecer en ninguna tarjeta.
@@ -172,44 +165,34 @@ for (const card of todas) {
   }
 }
 
-// 3. Superficie y techo se teclean; umbral y coeficiente van a botones.
-const tiposPorEntidad = new Map();
+// 3. Los ajustes de zona se ven pero no se editan en el panel: se cambian
+// solo en «Configurar» (§7.25). Ninguna tarjeta puede llevar un number ni un
+// control numérico, y cada zona muestra sus cuatro ajustes como atributos.
 for (const card of todas) {
   for (const ref of referencias(card)) {
-    if (!tiposPorEntidad.has(ref)) tiposPorEntidad.set(ref, []);
-    tiposPorEntidad.get(ref).push(card.type);
+    assert.ok(!ref.startsWith("number."), `${card.type} referencia ${ref}: los ajustes no se editan en el panel`);
+  }
+  for (const f of card.features || []) {
+    assert.notEqual(f.type, "numeric-input", "no debe quedar ningún control numérico");
   }
 }
 for (const zid of Object.keys(ZONAS)) {
-  for (const sufijo of ["umbral_de_riego", "coeficiente_de_ajuste"]) {
-    assert.ok(
-      tiposPorEntidad.get(`number.zona_${zid}_${sufijo}`)?.includes("tile"),
-      `${sufijo} de ${zid} debería ser un tile con botones`
-    );
-  }
-  for (const sufijo of ["superficie", "techo_de_seguridad"]) {
-    assert.ok(
-      tiposPorEntidad.get(`number.zona_${zid}_${sufijo}`)?.includes("entities"),
-      `${sufijo} de ${zid} debería ir en una tarjeta entities`
-    );
-  }
+  const ajustes = [...tarjetas(detalle)].find(
+    (c) => c.type === "entities" &&
+      (c.entities || []).some((e) => e.entity === `sensor.zona_${zid}_deficit_acumulado`)
+  );
+  assert.ok(ajustes, `faltan los ajustes de ${zid} en el Detalle`);
+  // join(): el array viene del contexto vm y deepEqual compara prototipos.
+  const atributos = ajustes.entities.map((e) => e.type === "attribute" && e.attribute).join(",");
+  assert.equal(atributos, "superficie_m2,umbral_mm,techo_l,factor_zona", `ajustes de ${zid}`);
 }
 
-// 3b. Los dos mandos del sistema: saltar el próximo riego con toggle y la
-// probabilidad de lluvia con botones, en el Resumen y en el Detalle.
-const MANDOS = [
-  ["switch.balance_hidrico_saltar_el_proximo_riego", "toggle"],
-  ["number.balance_hidrico_probabilidad_de_lluvia", "numeric-input"],
-];
+// 3b. «Saltar el próximo riego» sí es un mando: toggle en Resumen y Detalle.
 for (const [vista, nombre] of [[resumen, "Resumen"], [detalle, "Detalle"]]) {
-  for (const [entidad, tipo] of MANDOS) {
-    const tile = [...tarjetas(vista)].find((c) => c.type === "tile" && c.entity === entidad);
-    assert.ok(tile, `falta ${entidad} en ${nombre}`);
-    assert.ok(
-      (tile.features || []).some((f) => f.type === tipo),
-      `${entidad} en ${nombre} debería llevar ${tipo}`
-    );
-  }
+  const entidad = "switch.balance_hidrico_saltar_el_proximo_riego";
+  const tile = [...tarjetas(vista)].find((c) => c.type === "tile" && c.entity === entidad);
+  assert.ok(tile, `falta ${entidad} en ${nombre}`);
+  assert.ok((tile.features || []).some((f) => f.type === "toggle"), `${entidad} en ${nombre} sin toggle`);
 }
 
 // 4. «Previsto» es una proyección EN VIVO (§7.18): usa el ET₀ acumulado del
@@ -229,15 +212,13 @@ assert.ok(
   "el previsto no descuenta la lluvia efectiva"
 );
 for (const zid of Object.keys(ZONAS)) {
-  for (const sufijo of ["deficit_acumulado", "umbral_de_riego", "superficie", "techo_de_seguridad"]) {
-    const prefijo = sufijo === "umbral_de_riego" || sufijo === "superficie" || sufijo === "techo_de_seguridad"
-      ? "number"
-      : "sensor";
-    assert.ok(
-      previsto.content.includes(`${prefijo}.zona_${zid}_${sufijo}`),
-      `el previsto no usa ${sufijo} de ${zid}`
-    );
-  }
+  assert.ok(
+    previsto.content.includes(`sensor.zona_${zid}_deficit_acumulado`),
+    `el previsto no usa el déficit de ${zid}`
+  );
+}
+for (const atributo of ["umbral_mm", "superficie_m2", "techo_l"]) {
+  assert.ok(previsto.content.includes(`'${atributo}'`), `el previsto no lee ${atributo}`);
 }
 assert.ok(
   previsto.content.includes("kc_mes") && previsto.content.includes("factor_zona"),
@@ -317,13 +298,13 @@ assert.ok(
   "la cabecera debe proyectar con el ET₀ acumulado y la lluvia efectiva en vivo"
 );
 for (const zid of Object.keys(ZONAS)) {
-  for (const sufijo of ["deficit_acumulado", "superficie", "techo_de_seguridad"]) {
-    const prefijo = sufijo === "deficit_acumulado" ? "sensor" : "number";
-    assert.ok(
-      cabecera.content.includes(`${prefijo}.zona_${zid}_${sufijo}`),
-      `la cabecera no usa ${sufijo} de ${zid} para proyectar`
-    );
-  }
+  assert.ok(
+    cabecera.content.includes(`sensor.zona_${zid}_deficit_acumulado`),
+    `la cabecera no usa el déficit de ${zid} para proyectar`
+  );
+}
+for (const atributo of ["superficie_m2", "techo_l"]) {
+  assert.ok(cabecera.content.includes(`'${atributo}'`), `la cabecera no lee ${atributo}`);
 }
 // Cada marcador SENSOR_ET0_ACUM / SENSOR_LLUVIA se usa dos veces en la
 // plantilla (proyección + línea informativa): un .replace() sin "All"

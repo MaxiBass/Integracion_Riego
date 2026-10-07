@@ -85,7 +85,7 @@ class ZonaHabilitada(EntidadZona, SwitchEntity):
         return bool(self._zona.get("habilitada"))
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.set_valor_zona(self._zid, "habilitada", True)
+        await self.coordinator.set_habilitada(self._zid, True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.set_valor_zona(self._zid, "habilitada", False)
+        await self.coordinator.set_habilitada(self._zid, False)

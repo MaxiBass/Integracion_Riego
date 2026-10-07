@@ -205,29 +205,46 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         valor = self.opciones.get(clave)
         return defecto if valor is None else valor
 
-    # ── Valores en vivo (los editan las entidades number/switch) ──────
+    # ── Ajustes e interruptores ───────────────────────────────────────
     #
-    # La configuración solo siembra el valor inicial; a partir de ahí la
-    # fuente de verdad es el almacén, para que ajustar un number desde el
-    # panel no obligue a recargar la entrada de configuración.
+    # Cada cosa se cambia en un solo sitio (§7.25 en DECISIONES.md). Los
+    # ajustes —superficie, umbral, techo, coeficiente, probabilidad— solo en
+    # «Configurar». Los interruptores de uso diario —simulación, zona
+    # habilitada, saltar el próximo riego— solo con su switch, y su estado
+    # vive en el almacén.
 
     def runtime(self, zid: str) -> dict[str, Any]:
         return self._estado["zonas"].setdefault(zid, {})
 
     def valor_zona(self, zid: str, clave: str, defecto: Any) -> Any:
-        rt = self.runtime(zid)
-        if clave in rt and rt[clave] is not None:
-            return rt[clave]
         cfg = self.zona(zid) or {}
         valor = cfg.get(clave)
         return defecto if valor is None else valor
 
-    async def set_valor_zona(self, zid: str, clave: str, valor: Any) -> None:
-        self.runtime(zid)[clave] = valor
-        await self._guardar()
-        await self.async_refresh()
-        if clave in (Z_M2, Z_TECHO, Z_UMBRAL):
-            self._planificar()
+    def _migrar_ajustes_de_zona(self) -> bool:
+        """Pasa a «Configurar» los ajustes que se tocaron con los antiguos number.
+
+        Hasta v0.4 la superficie, el umbral, el techo y el coeficiente tenían
+        un control en vivo cuyo valor, guardado en el almacén, tapaba al de
+        «Configurar». Sin esta migración, quitar esos controles cambiaría en
+        silencio la dosis de una zona.
+        """
+        claves = (Z_M2, Z_UMBRAL, Z_TECHO, Z_FACTOR)
+        zonas, cambiadas = [], []
+        for zona in self.zonas:
+            rt = self.runtime(zona[Z_ID])
+            tocados = {k: rt.pop(k) for k in claves if rt.get(k) is not None}
+            for k in claves:
+                rt.pop(k, None)
+            if tocados:
+                cambiadas.append(f"{zona.get(Z_NOMBRE, zona[Z_ID])} {tocados}")
+            zonas.append({**zona, **tocados})
+        if cambiadas:
+            self.hass.config_entries.async_update_entry(
+                self.entry, options={**self.entry.options, CONF_ZONAS: zonas}
+            )
+            _LOGGER.info("Ajustes de zona llevados a la configuración: %s", "; ".join(cambiadas))
+        return bool(cambiadas)
 
     @property
     def simulacion(self) -> bool:
@@ -242,21 +259,10 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_refresh()
 
     def habilitada(self, zid: str) -> bool:
-        return bool(self.valor_zona(zid, "habilitada", True))
+        return bool(self.runtime(zid).get("habilitada", True))
 
-    @property
-    def probabilidad_lluvia(self) -> float:
-        """Probabilidad desde la que una hora de la previsión es lluvia probable.
-
-        Solo se ajusta con su control en el dispositivo, no en «Configurar»:
-        con los dos sitios, el control taparía para siempre lo configurado,
-        como pasa con los number de zona.
-        """
-        valor = self._estado.get(CONF_PROBABILIDAD_PREVISTA)
-        return float(DEFECTO_PROBABILIDAD_PREVISTA if valor is None else valor)
-
-    async def set_probabilidad_lluvia(self, valor: float) -> None:
-        self._estado[CONF_PROBABILIDAD_PREVISTA] = valor
+    async def set_habilitada(self, zid: str, valor: bool) -> None:
+        self.runtime(zid)["habilitada"] = valor
         await self._guardar()
         await self.async_refresh()
 
@@ -281,13 +287,14 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lluvia_total_desde": guardado.get("lluvia_total_desde"),
             "aplazado_lluvia": guardado.get("aplazado_lluvia", False),
             "saltar_proximo": guardado.get("saltar_proximo", False),
-            CONF_PROBABILIDAD_PREVISTA: guardado.get(CONF_PROBABILIDAD_PREVISTA),
             "ultimo_ciclo": guardado.get("ultimo_ciclo"),
             "ultimo_ciclo_programado": guardado.get("ultimo_ciclo_programado"),
             "zonas": guardado.get("zonas", {}),
             CONF_SIMULACION: guardado.get(CONF_SIMULACION),
         }
 
+        if self._migrar_ajustes_de_zona():
+            await self._guardar()
         for z in self.zonas:
             self.runtime(z[Z_ID]).setdefault("deficit", 0.0)
             self.runtime(z[Z_ID]).setdefault("litros_hoy", 0.0)
@@ -511,7 +518,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         horario = tipo == FORECAST_HORARIO
         tramos = horas if horario else max(1, round(horas / 24))
-        umbral = self.probabilidad_lluvia
+        umbral = float(self._opt(CONF_PROBABILIDAD_PREVISTA, DEFECTO_PROBABILIDAD_PREVISTA))
         total, probables, maxima = 0.0, 0, 0.0
         for tramo in prevision[:tramos]:
             if (mm := _flotante(tramo.get("precipitation"))) is not None:
@@ -818,7 +825,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         resumen["horas_lluvia_probable"] = prevista["horas_probables"]
         resumen["probabilidad_lluvia_max"] = prevista["probabilidad_max"]
         umbral_prevista = float(self._opt(CONF_LLUVIA_PREVISTA, DEFECTO_LLUVIA_PREVISTA))
-        umbral_prob = self.probabilidad_lluvia
+        umbral_prob = float(self._opt(CONF_PROBABILIDAD_PREVISTA, DEFECTO_PROBABILIDAD_PREVISTA))
         horas_min = int(self._opt(CONF_HORAS_PROBABLES, DEFECTO_HORAS_PROBABLES))
         por_cantidad = prevista["mm"] >= umbral_prevista
         por_probabilidad = 0 < horas_min <= prevista["horas_probables"]
@@ -1063,7 +1070,6 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lluvia_fuente": lluvia_fuente,
             "aplazado_lluvia": bool(self._estado.get("aplazado_lluvia")),
             "saltar_proximo": bool(self._estado.get("saltar_proximo")),
-            "probabilidad_lluvia": self.probabilidad_lluvia,
             "simulacion": self.simulacion,
             "proximo_ciclo": self._proximo,
             "ultimo_ciclo": self._estado.get("ultimo_ciclo"),

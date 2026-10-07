@@ -45,12 +45,13 @@ const ORDEN_ZONA = [
   "ultimo_riego",
 ];
 
-// Los number con pocos pasos se manejan bien a botones; superficie y techo
-// tienen rangos amplios y se teclean mejor en una tarjeta "entities".
-const NUMEROS_CON_BOTONES = [
-  "umbral_de_riego",
-  "coeficiente_de_ajuste",
-  "probabilidad_de_lluvia",
+// Ajustes de cada zona: desde v0.5.0 solo se cambian en «Configurar» y el
+// panel los muestra a partir de los atributos del sensor de déficit.
+const AJUSTES_ZONA = [
+  ["superficie_m2", "Superficie", " m²"],
+  ["umbral_mm", "Umbral de riego", " mm"],
+  ["techo_l", "Techo de seguridad", " L"],
+  ["factor_zona", "Coeficiente de ajuste", ""],
 ];
 
 /** Entidades de la integración, agrupadas por dispositivo. */
@@ -109,9 +110,6 @@ const tarjeta = (entity, extra = {}) => ({ type: "tile", entity, ...extra });
 // El tile de un switch usa la caracteristica "toggle". "switch-toggle" no
 // existe y hace que HA pinte una tarjeta de error de configuracion.
 const TOGGLE = [{ type: "toggle" }];
-// "box" no es un estilo válido de numeric-input: los únicos son "buttons" y
-// "slider". Con un valor inválido el tile se queda sin control utilizable.
-const BOTONES = [{ type: "numeric-input", style: "buttons" }];
 const LLENO = { columns: "full" };
 
 const encabezado = (texto, icono, estilo = "title", badges) => {
@@ -136,8 +134,7 @@ function plantillaResumen(zonas) {
     .map(({ nombre, entidades }) => {
       const e = (s) => porSufijo(entidades, s) || "";
       return `('${etiquetaZona(nombre).replace(/'/g, "")}','${e("estado")}',` +
-        `'${e("deficit_acumulado")}','${e("superficie")}','${e("techo_de_seguridad")}',` +
-        `'${e("bloqueada")}','${e("habilitada")}')`;
+        `'${e("deficit_acumulado")}','${e("bloqueada")}','${e("habilitada")}')`;
     })
     .join(",");
 
@@ -153,13 +150,13 @@ function plantillaResumen(zonas) {
 {%- set et0p = states('SENSOR_ET0_ACUM') | float(0) -%}
 {%- set lluvia = states('SENSOR_LLUVIA') | float(0) -%}
 {%- set ns = namespace(total=0) -%}
-{%- for nom, est, def, m2s, tec, blo, hab in zonas -%}
+{%- for nom, est, def, blo, hab in zonas -%}
 {%- set d = states(def) | float(0) -%}
 {%- set kc = state_attr(def, 'kc_mes') | float(0) -%}
 {%- set factor = state_attr(def, 'factor_zona') | float(1) -%}
 {%- set proy_mm = [d + et0p * kc * factor - lluvia, 0] | max -%}
-{%- set m2 = states(m2s) | float(0) -%}
-{%- set techo = states(tec) | float(1000) -%}
+{%- set m2 = state_attr(def, 'superficie_m2') | float(0) -%}
+{%- set techo = state_attr(def, 'techo_l') | float(1000) -%}
 {%- set proy_l = [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
 {%- set ns.total = ns.total + proy_l -%}
 {%- endfor -%}
@@ -179,13 +176,13 @@ El déficit se está acumulando para el próximo ciclo.
 
 | Zona | Estado | Déficit + hoy | Previsto |
 |:--|:--|--:|--:|
-{% for nom, est, def, m2s, tec, blo, hab in zonas -%}
+{% for nom, est, def, blo, hab in zonas -%}
 {%- set d = states(def) | float(0) -%}
 {%- set kc = state_attr(def, 'kc_mes') | float(0) -%}
 {%- set factor = state_attr(def, 'factor_zona') | float(1) -%}
 {%- set proy_mm = [d + et0p * kc * factor - lluvia, 0] | max -%}
-{%- set m2 = states(m2s) | float(0) -%}
-{%- set techo = states(tec) | float(1000) -%}
+{%- set m2 = state_attr(def, 'superficie_m2') | float(0) -%}
+{%- set techo = state_attr(def, 'techo_l') | float(1000) -%}
 {%- set proy_l = [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
 | {{ nom }} | {{ states(est) }} | {{ proy_mm | round(2) }} mm | {{ proy_l }} L |
 {% endfor -%}
@@ -194,7 +191,7 @@ El déficit se está acumulando para el próximo ciclo.
 ET₀ periodo anterior **{{ states('SENSOR_ET0_ANTERIOR') }} mm** ·
 acumulada **{{ states('SENSOR_ET0_ACUM') }} mm** ·
 lluvia efectiva **{{ states('SENSOR_LLUVIA') }} mm**
-{% for nom, est, def, m2s, tec, blo, hab in zonas -%}
+{% for nom, est, def, blo, hab in zonas -%}
 {%- if blo and is_state(blo,'on') %}
 ⛔ {{ nom }} bloqueada — el riego se salta y el déficit se conserva
 {% endif -%}
@@ -248,10 +245,7 @@ function plantillaPrevisto(zonas, sensorEt0Acum, sensorLluvia) {
   const filas = zonas
     .map(({ nombre, entidades }) => {
       const deficit = porSufijo(entidades, "deficit_acumulado") || "";
-      const umbral = porSufijo(entidades, "umbral_de_riego") || "";
-      const m2 = porSufijo(entidades, "superficie") || "";
-      const techo = porSufijo(entidades, "techo_de_seguridad") || "";
-      return `('${etiquetaZona(nombre).replace(/'/g, "")}','${deficit}','${umbral}','${m2}','${techo}')`;
+      return `('${etiquetaZona(nombre).replace(/'/g, "")}','${deficit}')`;
     })
     .join(",");
 
@@ -262,13 +256,13 @@ function plantillaPrevisto(zonas, sensorEt0Acum, sensorLluvia) {
 **En vivo** · lo que llevaría cada zona si el ciclo se ejecutara ahora mismo
 (el ciclo real corre en el próximo amanecer, y hasta entonces la ET₀ sigue sumando)
 
-{% for nom, defi, umb, m2s, tec in zonas -%}
+{% for nom, defi in zonas -%}
 {%- set d = states(defi) | float(0) -%}
 {%- set kc = state_attr(defi, 'kc_mes') | float(0) -%}
 {%- set factor = state_attr(defi, 'factor_zona') | float(1) -%}
-{%- set umbral = states(umb) | float(0.5) -%}
-{%- set m2 = states(m2s) | float(0) -%}
-{%- set techo = states(tec) | float(1000) -%}
+{%- set umbral = state_attr(defi, 'umbral_mm') | float(0.5) -%}
+{%- set m2 = state_attr(defi, 'superficie_m2') | float(0) -%}
+{%- set techo = state_attr(defi, 'techo_l') | float(1000) -%}
 {%- set proy_mm = [d + et0p * kc * factor - lluvia, 0] | max -%}
 {%- set proy_l = [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
 {%- set pct = [(proy_l / [techo, 1] | max * 100) | round(0) | int, 100] | min -%}
@@ -300,23 +294,15 @@ function vistaResumen(sistema, zonas) {
     s("simulacion"),
   ].filter(Boolean);
 
-  // Los dos mandos del día a día, bajo la cabecera: saltar el próximo
-  // riego y la probabilidad de lluvia que aplaza el ciclo.
+  // El mando del día a día, bajo la cabecera. Los ajustes no van aquí: se
+  // cambian solo en «Configurar» (§7.25 en DECISIONES.md).
   const mandos = [];
   const saltar = s("saltar_el_proximo_riego");
-  const probabilidad = s("probabilidad_de_lluvia");
   if (saltar) {
     mandos.push(tarjeta(saltar, {
-      name: "Saltar próximo riego",
+      name: "Saltar el próximo riego",
       features: TOGGLE,
-      grid_options: { columns: COLS / 2 },
-    }));
-  }
-  if (probabilidad) {
-    mandos.push(tarjeta(probabilidad, {
-      name: "Probabilidad que aplaza",
-      features: BOTONES,
-      grid_options: { columns: COLS / 2 },
+      grid_options: LLENO,
     }));
   }
 
@@ -465,7 +451,6 @@ function seccionSistema(hass, entidades) {
   );
   const interruptores = entidades.filter((e) => e.startsWith("switch."));
   const binarios = entidades.filter((e) => e.startsWith("binary_sensor."));
-  const numeros = entidades.filter((e) => e.startsWith("number."));
 
   const n = (e) => nombreCorto(hass, e, "Balance Hídrico");
   const cards = [
@@ -473,7 +458,6 @@ function seccionSistema(hass, entidades) {
     ...sensores.map((e) => tarjeta(e, { name: n(e) })),
     ...binarios.map((e) => tarjeta(e, { name: n(e) })),
     ...interruptores.map((e) => tarjeta(e, { name: n(e), features: TOGGLE })),
-    ...numeros.map((e) => tarjeta(e, { name: n(e), features: BOTONES })),
   ];
 
   const acumulada = porSufijo(entidades, "et0_acumulada_del_periodo");
@@ -500,7 +484,6 @@ function seccionZona(hass, nombre, entidades) {
   );
   const binarios = entidades.filter((e) => e.startsWith("binary_sensor."));
   const interruptores = entidades.filter((e) => e.startsWith("switch."));
-  const numeros = entidades.filter((e) => e.startsWith("number."));
 
   const n = (e) => nombreCorto(hass, e, nombre);
   const tarjetas = [
@@ -510,22 +493,21 @@ function seccionZona(hass, nombre, entidades) {
     ...sensores.map((e) => tarjeta(e, { name: n(e) })),
   ];
 
-  if (numeros.length) {
-    tarjetas.push(encabezado("Ajustes", "mdi:tune", "subtitle"));
-    const conBotones = numeros.filter((e) =>
-      NUMEROS_CON_BOTONES.some((sufijo) => e.endsWith(`_${sufijo}`))
-    );
-    const tecleados = numeros.filter((e) => !conBotones.includes(e));
-    for (const e of conBotones) {
-      tarjetas.push(tarjeta(e, { name: n(e), features: BOTONES }));
-    }
-    if (tecleados.length) {
-      tarjetas.push({
-        type: "entities",
-        grid_options: LLENO,
-        entities: tecleados.map((e) => ({ entity: e, name: n(e) })),
-      });
-    }
+  // Ajustes de solo lectura: se cambian en «Configurar» → Zonas.
+  const deficitZona = porSufijo(entidades, "deficit_acumulado");
+  if (deficitZona) {
+    tarjetas.push(encabezado("Ajustes · se cambian en Configurar", "mdi:tune", "subtitle"));
+    tarjetas.push({
+      type: "entities",
+      grid_options: LLENO,
+      entities: AJUSTES_ZONA.map(([atributo, nombreAjuste, sufijo]) => ({
+        type: "attribute",
+        entity: deficitZona,
+        attribute: atributo,
+        name: nombreAjuste,
+        ...(sufijo ? { suffix: sufijo } : {}),
+      })),
+    });
   }
 
   const temporada = porSufijo(entidades, "litros_de_la_temporada");

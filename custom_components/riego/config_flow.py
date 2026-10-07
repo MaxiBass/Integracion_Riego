@@ -34,6 +34,7 @@ from .const import (
     CONF_MODO_INICIO,
     CONF_NOTIFY,
     CONF_OFFSET_AMANECER,
+    CONF_PROBABILIDAD_PREVISTA,
     CONF_SENSOR_HUMEDAD,
     CONF_SENSOR_ILUMINANCIA,
     CONF_SENSOR_LLUVIA,
@@ -65,6 +66,7 @@ from .const import (
     DEFECTO_M2,
     DEFECTO_MARGEN_DURACION,
     DEFECTO_OFFSET_AMANECER,
+    DEFECTO_PROBABILIDAD_PREVISTA,
     DEFECTO_TECHO,
     DEFECTO_TEMP_HELADA,
     DEFECTO_UMBRAL,
@@ -182,6 +184,10 @@ def esquema_prevision(valores: dict[str, Any]) -> vol.Schema:
                 default=valores.get(CONF_LLUVIA_PREVISTA, DEFECTO_LLUVIA_PREVISTA),
             ): _numero(0.5, 50, 0.5, "mm"),
             vol.Required(
+                CONF_PROBABILIDAD_PREVISTA,
+                default=valores.get(CONF_PROBABILIDAD_PREVISTA, DEFECTO_PROBABILIDAD_PREVISTA),
+            ): _numero(10, 100, 5, "%"),
+            vol.Required(
                 CONF_HORAS_PROBABLES,
                 default=valores.get(CONF_HORAS_PROBABLES, DEFECTO_HORAS_PROBABLES),
             ): _numero(0, 120, 1, "h"),
@@ -198,49 +204,55 @@ def esquema_prevision(valores: dict[str, Any]) -> vol.Schema:
     )
 
 
-def esquema_ciclo(valores: dict[str, Any]) -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Required(
-                CONF_MODO_INICIO, default=valores.get(CONF_MODO_INICIO, MODO_FIN_AMANECER)
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[MODO_FIN_AMANECER, MODO_OFFSET_AMANECER, MODO_HORA_FIJA],
-                    translation_key="modo_inicio",
-                )
-            ),
-            vol.Required(
-                CONF_OFFSET_AMANECER,
-                default=valores.get(CONF_OFFSET_AMANECER, DEFECTO_OFFSET_AMANECER),
-            ): _numero(-240, 240, 5, "min"),
-            vol.Required(
-                CONF_HORA_FIJA, default=valores.get(CONF_HORA_FIJA, DEFECTO_HORA_FIJA)
-            ): selector.TimeSelector(),
-            vol.Required(
-                CONF_HORA_MINIMA, default=valores.get(CONF_HORA_MINIMA, DEFECTO_HORA_MINIMA)
-            ): selector.TimeSelector(),
-            vol.Required(
-                CONF_MARGEN_DURACION,
-                default=valores.get(CONF_MARGEN_DURACION, DEFECTO_MARGEN_DURACION),
-            ): _numero(0, 120, 5, "min"),
-            vol.Required(
-                CONF_DESFASE_ZONAS, default=valores.get(CONF_DESFASE_ZONAS, DEFECTO_DESFASE_ZONAS)
-            ): _numero(0, 7200, 10, "s"),
-            vol.Required(
-                CONF_DEFICIT_MAXIMO,
-                default=valores.get(CONF_DEFICIT_MAXIMO, DEFECTO_DEFICIT_MAXIMO),
-            ): _numero(5, 200, 1, "mm"),
-            # Optional, no Required: ha-form trata un booleano obligatorio con
-            # valor false como «campo sin rellenar» y bloquea el envío sin
-            # mostrar ningún error, de modo que desmarcarlo sería imposible.
-            vol.Optional(
-                CONF_SIMULACION, default=valores.get(CONF_SIMULACION, True)
-            ): selector.BooleanSelector(),
-            vol.Optional(
-                CONF_NOTIFY, description={"suggested_value": valores.get(CONF_NOTIFY)}
-            ): _sensor("notify"),
-        }
-    )
+def esquema_ciclo(valores: dict[str, Any], alta: bool = False) -> vol.Schema:
+    """Planificación del ciclo.
+
+    El modo simulación solo aparece en el alta, para empezar con él puesto. Una
+    vez creada la integración se cambia con su interruptor: tenerlo también
+    aquí sería un ajuste fantasma, porque manda el interruptor (§7.25).
+    """
+    campos: dict[Any, Any] = {
+        vol.Required(
+            CONF_MODO_INICIO, default=valores.get(CONF_MODO_INICIO, MODO_FIN_AMANECER)
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[MODO_FIN_AMANECER, MODO_OFFSET_AMANECER, MODO_HORA_FIJA],
+                translation_key="modo_inicio",
+            )
+        ),
+        vol.Required(
+            CONF_OFFSET_AMANECER,
+            default=valores.get(CONF_OFFSET_AMANECER, DEFECTO_OFFSET_AMANECER),
+        ): _numero(-240, 240, 5, "min"),
+        vol.Required(
+            CONF_HORA_FIJA, default=valores.get(CONF_HORA_FIJA, DEFECTO_HORA_FIJA)
+        ): selector.TimeSelector(),
+        vol.Required(
+            CONF_HORA_MINIMA, default=valores.get(CONF_HORA_MINIMA, DEFECTO_HORA_MINIMA)
+        ): selector.TimeSelector(),
+        vol.Required(
+            CONF_MARGEN_DURACION,
+            default=valores.get(CONF_MARGEN_DURACION, DEFECTO_MARGEN_DURACION),
+        ): _numero(0, 120, 5, "min"),
+        vol.Required(
+            CONF_DESFASE_ZONAS, default=valores.get(CONF_DESFASE_ZONAS, DEFECTO_DESFASE_ZONAS)
+        ): _numero(0, 7200, 10, "s"),
+        vol.Required(
+            CONF_DEFICIT_MAXIMO,
+            default=valores.get(CONF_DEFICIT_MAXIMO, DEFECTO_DEFICIT_MAXIMO),
+        ): _numero(5, 200, 1, "mm"),
+    }
+    if alta:
+        # Optional, no Required: ha-form trata un booleano obligatorio con
+        # valor false como «campo sin rellenar» y bloquea el envío sin
+        # mostrar ningún error, de modo que desmarcarlo sería imposible.
+        campos[vol.Optional(CONF_SIMULACION, default=valores.get(CONF_SIMULACION, True))] = (
+            selector.BooleanSelector()
+        )
+    campos[
+        vol.Optional(CONF_NOTIFY, description={"suggested_value": valores.get(CONF_NOTIFY)})
+    ] = _sensor("notify")
+    return vol.Schema(campos)
 
 
 def esquema_zona(valores: dict[str, Any]) -> vol.Schema:
@@ -342,7 +354,7 @@ class RiegoConfigFlow(ConfigFlow, domain=DOMAIN):
             self._datos.update(user_input)
             self._datos[CONF_ZONAS] = []
             return await self.async_step_zona()
-        return self.async_show_form(step_id="ciclo", data_schema=esquema_ciclo({}))
+        return self.async_show_form(step_id="ciclo", data_schema=esquema_ciclo({}, alta=True))
 
     async def async_step_zona(self, user_input=None) -> ConfigFlowResult:
         if user_input is not None:

@@ -63,6 +63,13 @@ Consecuencias para quien edite esto:
   `automations.yaml` de HA: «Notificaciones Riego Telegram 1» y «Vigilancia de
   caudal anómalo». Sus umbrales de volumen y de tiempo pasando agua se derivaron
   del techo de cada zona: si cambias un techo, revísalos (§7.17).
+- **El panel `riego-balance` de HA no es la estrategia**: es una copia fija
+  retocada a mano. Los cambios de `riego-strategy.js` no le llegan; si
+  cambian o desaparecen entidades, hay que editarlo aparte con el MCP
+  (`get_dashboard_config` / `save_dashboard_config`). Ver §7.25.
+- **Los ajustes se cambian solo en Configurar** (desde v0.5.0 no hay `number`);
+  los interruptores (simulación, zona habilitada, saltar el próximo riego),
+  solo con su switch. No reintroducir un ajuste en dos sitios (§7.25).
 - **No te fíes de `switch.riego_*` para saber si una válvula riega**: puede
   quedarse en `on` horas después de cerrar (§7.22). Lo fiable es el caudal
   (`sensor.riego_*_flow`, que es lo que usa la integración) o

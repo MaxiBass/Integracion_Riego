@@ -41,8 +41,6 @@ FORECAST_DIARIO: Final = "daily"
 CONF_LLUVIA_MINIMA: Final = "lluvia_minima"
 CONF_LLUVIA_CAP: Final = "lluvia_cap"
 CONF_LLUVIA_PREVISTA: Final = "lluvia_prevista_umbral"
-# La probabilidad no está en el flujo de opciones: se ajusta en vivo con su
-# number del dispositivo Balance Hídrico, y esta es su clave en el almacén.
 CONF_PROBABILIDAD_PREVISTA: Final = "lluvia_probabilidad_umbral"
 CONF_HORAS_PROBABLES: Final = "lluvia_horas_probables"
 CONF_TEMP_HELADA: Final = "temp_helada"
