@@ -293,7 +293,9 @@ que publican en el mismo topic. No se borran, pero no hay que tocarlas.
   hora de arranque queda algo desplazada. El riego en sí sí usa los valores
   del momento.
 - El aplazamiento por lluvia es de un día como máximo, igual que el sistema
-  anterior: si al día siguiente sigue dando lluvia, riega igual.
+  anterior: si al día siguiente sigue dando lluvia, riega igual. Desde v0.4.0
+  aplaza también por probabilidad (§7.23), que con AEMET es lo que de verdad
+  avisa.
 - La API de estrategias de Lovelace no está congelada; si una actualización
   de HA la rompe, el panel se puede rehacer a mano con tarjetas normales.
 - La cobertura de `tests/test_riego.py` es de comportamiento, no exhaustiva:
@@ -358,7 +360,8 @@ usa la integración:
 | `baromabsin` | Absolute Pressure (hPa) | **Presión** |
 | `baromrelin` | Relative Pressure (hPa) | no usar |
 | `windspeedmph` | Wind Speed (km/h) | **Viento** |
-| `last24hrainin` | 24h Rain (mm) | **Lluvia efectiva** |
+| `yearlyrainin` | Total Rain (mm) | **Lluvia efectiva**: contador entre ciclos (§7.23) |
+| `last24hrainin` | 24h Rain (mm) | respaldo de la lluvia hasta completar un periodo con el contador |
 | `vpd` | Vapour Pressure Deficit (kPa) | no usado; la integración calcula es−ea |
 | `uv`, `winddir`, `dewpoint`, lluvias varias, interiores | — | no usados |
 
@@ -1023,3 +1026,85 @@ al 05/10), incluido el del 01/10,
 cuando HA se reinició en mitad del riego de Frutales (07:28) y la válvula
 siguió sola hasta cerrarse a las 07:35 —buena prueba, de paso, del diseño
 «dispara y olvida» de §4.2—.
+
+### 7.23 La lluvia: medida entre ciclos y aplazamiento por probabilidad (v0.4.0)
+
+El 07/10, al repasar cómo había tratado el sistema la lluvia de esa semana,
+salieron dos defectos. Ninguno había costado agua todavía, pero los dos iban a
+repetirse. Horas en hora local.
+
+**Regaba justo antes de llover.** El 06/10 el ciclo de las 06:56 regó
+239/95/50 L, y a las 07:17 empezó a llover: 8,41 mm hasta las 12:22. AEMET
+daba una probabilidad alta, pero repartía la cantidad a 0,1 mm por hora:
+unos 0,7 mm en 24 h, lejos de los 3 mm del umbral. No fue un caso raro: AEMET
+publica así las cantidades horarias, y la previsión del 08/10 vuelve a ser
+6 h al 75 % con 0,1 mm/h (0,6 mm). Con esta fuente, sumar milímetros casi
+nunca aplaza; la probabilidad sí avisa.
+
+Regla nueva: se aplaza si la cantidad prevista llega al umbral (3 mm, como
+antes) **o** si en el horizonte hay al menos 3 horas con una probabilidad del
+70 % o más. Las dos cifras se pueden configurar, y con 0 horas el criterio de
+probabilidad queda desactivado. AEMET da la probabilidad por tramos de 6 h
+(00–06, 06–12, 12–18 y 18–24), así que en la práctica basta un tramo al 70 %
+o más. Con previsión diaria, cada día probable cuenta como 24 h.
+
+Equivocarse aplazando sale barato, y ya ha pasado: el 17/09 se aplazó por
+lluvia que no cayó (§7.15). El déficit se conserva y el aplazamiento sigue
+limitado a un día: si al día siguiente la previsión sigue igual, se riega. En
+pleno verano sí hay un coste. Hay que reponer dos días de golpe, y el techo
+de la zona puede no llegar (800 L son 5,7 mm en Frutales), así que el resto
+queda para el ciclo siguiente.
+
+**La lluvia se medía con una ventana que no casa con el periodo.** El ciclo
+descontaba lo que marcaba `sensor.estacion_meteorologica_24h_rain` en ese
+momento. En el ciclo del 07/10 marcaba 5,59 mm, pero entre los dos ciclos
+cayeron 8,41 (el contador total pasó de 266,09 a 274,50). Faltan 2,82 mm, por
+dos motivos:
+
+- **El periodo entre ciclos no dura 24 h.** La hora de arranque se mueve con
+  lo que haya que regar: del 06/10 a las 06:56 al 07/10 a las 07:46 pasaron
+  24 h 50 min. Los primeros 50 min no caben en la ventana de 24 h, y ahí cayó
+  1,02 mm. Cuando el periodo es más corto pasa lo contrario: la ventana se
+  solapa con la del ciclo anterior y una misma lluvia se descuenta dos veces.
+- **La estación descarta la lluvia por horas enteras, y una hora antes de
+  tiempo.** El 07/10 a las 07:01 el sensor bajó de 8,41 a 5,59 mm: soltó de
+  golpe la lluvia de las 07:17 a las 08:00 del día anterior, con 1,80 mm que
+  aún estaban dentro de las 24 h.
+
+Además, el panel contaba dos veces la misma lluvia. Tras el ciclo, el sensor
+de 24 h sigue marcando una lluvia que ya se ha descontado, y la proyección en
+vivo (§7.18) la restaba otra vez. El 03/10 restó los 6,81 mm del día 2 hasta
+las 18:00, y el 07/10 restó los 5,59 mm hasta las 08:00.
+
+Solución: un sensor opcional nuevo, el **contador de lluvia total**
+(`sensor.estacion_meteorologica_total_rain`). La lluvia pasa a medirse igual
+que la ET₀: cada minuto se suma lo que ha subido el contador, el ciclo lo
+descuenta y lo pone a cero. Detalles:
+
+- Las lecturas `unavailable` o `unknown` se saltan. La lluvia caída con HA
+  parado se recoge en la primera lectura tras el arranque, porque se resta
+  del último valor guardado.
+- Si el contador baja más de un 10 %, se toma como puesta a cero y lo que
+  marca es lluvia nueva. Es el mismo criterio que aplica HA a los
+  `total_increasing`. Una bajada menor se toma como ruido: se ignora, y la
+  referencia no se mueve, para no contar dos veces la lluvia cuando el
+  contador se recupere. En esta estación el contador «total» es en realidad
+  el anual (`yearlyrainin`; el total y el anual valen lo mismo), así que se
+  pondrá a cero cada 1 de enero.
+- La primera lectura solo fija la referencia. Si el contador se configura
+  después del último ciclo, lo acumulado no cubre el periodo entero; ese
+  primer ciclo sigue usando el sensor de 24 h, y a partir del siguiente se
+  usa el contador. Así el cambio no pierde lluvia.
+- La lluvia mínima (2 mm) y el tope (20 mm) se siguen aplicando, ahora a la
+  lluvia del periodo.
+
+`sensor.balance_hidrico_lluvia_efectiva` cambia de significado: ahora es la
+lluvia efectiva del periodo en curso y vuelve a 0 en cada ciclo, como la ET₀
+acumulada. Lleva dos atributos nuevos: `lluvia_medida_mm` (antes de aplicar
+el mínimo y el tope) y `fuente` (`contador` o `24 h`). La proyección del
+panel acierta sin tocar la estrategia. La gráfica diaria «Lluvia efectiva»
+(máximo del día) mantiene un efecto que ya tenía: la lluvia de una tarde
+aparece también al día siguiente, hasta el ciclo.
+
+El evento `riego_evento` del ciclo lleva campos nuevos: `lluvia_medida`,
+`fuente_lluvia`, `horas_lluvia_probable` y `probabilidad_lluvia_max`.

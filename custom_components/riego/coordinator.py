@@ -34,6 +34,7 @@ from .const import (
     CONF_FORECAST_TIPO,
     CONF_HORA_FIJA,
     CONF_HORA_MINIMA,
+    CONF_HORAS_PROBABLES,
     CONF_LLUVIA_CAP,
     CONF_LLUVIA_MINIMA,
     CONF_LLUVIA_PREVISTA,
@@ -41,9 +42,11 @@ from .const import (
     CONF_MODO_INICIO,
     CONF_NOTIFY,
     CONF_OFFSET_AMANECER,
+    CONF_PROBABILIDAD_PREVISTA,
     CONF_SENSOR_HUMEDAD,
     CONF_SENSOR_ILUMINANCIA,
     CONF_SENSOR_LLUVIA,
+    CONF_SENSOR_LLUVIA_TOTAL,
     CONF_SENSOR_PRESION,
     CONF_SENSOR_RADIACION,
     CONF_SENSOR_TEMP,
@@ -63,6 +66,7 @@ from .const import (
     DEFECTO_FORECAST_HORAS,
     DEFECTO_HORA_FIJA,
     DEFECTO_HORA_MINIMA,
+    DEFECTO_HORAS_PROBABLES,
     DEFECTO_KC,
     DEFECTO_LLUVIA_CAP,
     DEFECTO_LLUVIA_MINIMA,
@@ -70,6 +74,7 @@ from .const import (
     DEFECTO_M2,
     DEFECTO_MARGEN_DURACION,
     DEFECTO_OFFSET_AMANECER,
+    DEFECTO_PROBABILIDAD_PREVISTA,
     DEFECTO_TECHO,
     DEFECTO_TEMP_HELADA,
     DEFECTO_UMBRAL,
@@ -135,6 +140,11 @@ VENTANA_PLANIFICACION = timedelta(hours=8)
 # se considera el de ese amanecer. Menos de 24 h para no confundirlo con el
 # del día anterior.
 VENTANA_CICLO_CUMPLIDO = timedelta(hours=18)
+# Una bajada del contador de lluvia por debajo del 90 % de la lectura anterior
+# se toma como puesta a cero (cambio de año, reinicio de la estación); una
+# bajada menor, como ruido de lectura. Es el mismo criterio que aplica Home
+# Assistant a los sensores total_increasing.
+CAIDA_REINICIO_CONTADOR = 0.9
 
 
 def _num(estado: State | None, defecto: float = 0.0) -> float:
@@ -145,6 +155,16 @@ def _num(estado: State | None, defecto: float = 0.0) -> float:
         return float(estado.state)
     except (TypeError, ValueError):
         return defecto
+
+
+def _flotante(valor: Any) -> float | None:
+    """Convierte a float un valor de la previsión, o None si no es numérico."""
+    if valor is None:
+        return None
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return None
 
 
 class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -232,6 +252,10 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "et0_periodo_anterior": guardado.get("et0_periodo_anterior", 0.0),
             "et0_previa": guardado.get("et0_previa", 0.0),
             "ultima_integracion": guardado.get("ultima_integracion"),
+            "lluvia_acumulada": guardado.get("lluvia_acumulada", 0.0),
+            "lluvia_total_previa": guardado.get("lluvia_total_previa"),
+            "lluvia_total_entidad": guardado.get("lluvia_total_entidad"),
+            "lluvia_total_desde": guardado.get("lluvia_total_desde"),
             "aplazado_lluvia": guardado.get("aplazado_lluvia", False),
             "ultimo_ciclo": guardado.get("ultimo_ciclo"),
             "ultimo_ciclo_programado": guardado.get("ultimo_ciclo_programado"),
@@ -247,11 +271,13 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._desuscriptores.append(
             async_track_time_interval(
                 self.hass,
-                self._tick_et0,
+                self._tick,
                 timedelta(seconds=INTERVALO_ET0_SEGUNDOS),
             )
         )
         self._suscribir_caudales()
+        # Recoge en el acto la lluvia caída con Home Assistant parado.
+        self._integrar_lluvia()
         self._planificar()
         await self.async_refresh()
 
@@ -332,8 +358,15 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
         )
 
-    async def _tick_et0(self, _ahora: datetime) -> None:
-        """Integra la ET₀ instantánea al acumulado (Riemann por la izquierda)."""
+    async def _tick(self, _ahora: datetime) -> None:
+        """Integra la ET₀ y la lluvia del periodo. Corre cada minuto."""
+        self._integrar_lluvia()
+        self._integrar_et0()
+        await self._guardar()
+        await self.async_refresh()
+
+    def _integrar_et0(self) -> None:
+        """Suma la ET₀ instantánea al acumulado (Riemann por la izquierda)."""
         resultado = self._et0_instantanea()
         if resultado is None:
             return
@@ -349,25 +382,90 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._estado["ultima_integracion"] = ahora.isoformat()
         self._estado["et0_previa"] = resultado.et0
-        await self._guardar()
-        await self.async_refresh()
 
     # ── Lluvia ────────────────────────────────────────────────────────
+    #
+    # Con un contador de lluvia total configurado, la lluvia se mide igual que
+    # la ET₀: se acumula lo que sube el contador entre un ciclo y el siguiente
+    # y el ciclo lo pone a cero. El sensor de 24 h no sirve para eso: su
+    # ventana no coincide con el periodo entre ciclos, que dura más o menos de
+    # 24 h según la hora de arranque, y la estación descarta la lluvia por
+    # horas enteras y una hora antes de tiempo (§7.23 en DECISIONES.md).
+
+    def _integrar_lluvia(self) -> None:
+        """Suma al periodo en curso lo que ha subido el contador de lluvia."""
+        ent = self.opciones.get(CONF_SENSOR_LLUVIA_TOTAL)
+        if not ent:
+            return
+        estado = self.hass.states.get(ent)
+        if estado is None or estado.state in ("unknown", "unavailable", ""):
+            return
+        try:
+            actual = float(estado.state)
+        except (TypeError, ValueError):
+            return
+
+        previa = self._estado.get("lluvia_total_previa")
+        if previa is None or self._estado.get("lluvia_total_entidad") != ent:
+            # Primera lectura de este contador: solo fija la referencia.
+            self._estado["lluvia_total_entidad"] = ent
+            self._estado["lluvia_total_desde"] = dt_util.utcnow().isoformat()
+            self._estado["lluvia_acumulada"] = 0.0
+        elif actual >= previa:
+            self._estado["lluvia_acumulada"] += actual - previa
+        elif actual < previa * CAIDA_REINICIO_CONTADOR:
+            # Puesta a cero: todo lo que marca ahora es lluvia nueva.
+            self._estado["lluvia_acumulada"] += actual
+        else:
+            # Ruido de lectura. Se conserva la referencia para no contar dos
+            # veces la lluvia cuando el contador recupere su valor.
+            return
+        self._estado["lluvia_total_previa"] = actual
+
+    def _periodo_medido(self) -> bool:
+        """¿Lleva el contador midiendo desde el último ciclo, o desde antes?
+
+        Si se configuró después del último ciclo, lo acumulado no cubre el
+        periodo entero y falta la lluvia caída entre el ciclo y el alta.
+        """
+        desde = self._estado.get("lluvia_total_desde")
+        if not desde:
+            return False
+        ultimo = self._estado.get("ultimo_ciclo")
+        return not ultimo or dt_util.parse_datetime(desde) <= dt_util.parse_datetime(ultimo)
+
+    def _lluvia_periodo(self) -> tuple[float, str]:
+        """Lluvia caída en el periodo en curso, en mm, y de dónde sale.
+
+        Mientras el contador no lleve un periodo entero medido se sigue usando
+        el sensor de 24 h, si lo hay, como antes de existir el contador.
+        """
+        contador = self.opciones.get(CONF_SENSOR_LLUVIA_TOTAL)
+        sensor_24h = self.opciones.get(CONF_SENSOR_LLUVIA)
+        if contador and (self._periodo_medido() or not sensor_24h):
+            return float(self._estado.get("lluvia_acumulada") or 0.0), "contador"
+        if sensor_24h:
+            return _num(self.hass.states.get(sensor_24h), 0.0), "24 h"
+        return 0.0, "sin sensor"
 
     def _lluvia_efectiva(self) -> float:
-        ent = self.opciones.get(CONF_SENSOR_LLUVIA)
-        if not ent:
-            return 0.0
-        bruto = _num(self.hass.states.get(ent), 0.0)
+        bruto, _fuente = self._lluvia_periodo()
         minima = float(self._opt(CONF_LLUVIA_MINIMA, DEFECTO_LLUVIA_MINIMA))
         cap = float(self._opt(CONF_LLUVIA_CAP, DEFECTO_LLUVIA_CAP))
-        return 0.0 if bruto < minima else min(bruto, cap)
+        return 0.0 if bruto < minima else round(min(bruto, cap), 2)
 
-    async def _lluvia_prevista(self) -> float:
-        """Suma de precipitación prevista en el horizonte configurado."""
+    async def _lluvia_prevista(self) -> dict[str, float]:
+        """Lluvia prevista en el horizonte configurado.
+
+        Devuelve los milímetros sumados (`mm`), las horas con probabilidad de
+        lluvia igual o superior al umbral (`horas_probables`) y la probabilidad
+        más alta (`probabilidad_max`). Con previsión diaria, cada día probable
+        cuenta como 24 h.
+        """
+        vacia = {"mm": 0.0, "horas_probables": 0, "probabilidad_max": 0}
         entidad = self.opciones.get(CONF_WEATHER)
         if not entidad:
-            return 0.0
+            return vacia
         tipo = self._opt(CONF_FORECAST_TIPO, FORECAST_HORARIO)
         horas = int(self._opt(CONF_FORECAST_HORAS, DEFECTO_FORECAST_HORAS))
         try:
@@ -380,22 +478,28 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except Exception:  # noqa: BLE001 - la previsión nunca debe tumbar el ciclo
             _LOGGER.warning("No se pudo consultar la previsión de %s", entidad, exc_info=True)
-            return 0.0
+            return vacia
 
         prevision = (respuesta or {}).get(entidad, {}).get("forecast", [])
         if not prevision:
-            return 0.0
+            return vacia
 
-        tramos = horas if tipo == FORECAST_HORARIO else max(1, round(horas / 24))
-        total = 0.0
+        horario = tipo == FORECAST_HORARIO
+        tramos = horas if horario else max(1, round(horas / 24))
+        umbral = float(self._opt(CONF_PROBABILIDAD_PREVISTA, DEFECTO_PROBABILIDAD_PREVISTA))
+        total, probables, maxima = 0.0, 0, 0.0
         for tramo in prevision[:tramos]:
-            valor = tramo.get("precipitation")
-            if valor is not None:
-                try:
-                    total += float(valor)
-                except (TypeError, ValueError):
-                    continue
-        return round(total, 2)
+            if (mm := _flotante(tramo.get("precipitation"))) is not None:
+                total += mm
+            if (prob := _flotante(tramo.get("precipitation_probability"))) is not None:
+                maxima = max(maxima, prob)
+                if prob >= umbral:
+                    probables += 1 if horario else 24
+        return {
+            "mm": round(total, 2),
+            "horas_probables": probables,
+            "probabilidad_max": round(maxima),
+        }
 
     # ── Caudal aprendido por zona ─────────────────────────────────────
 
@@ -627,7 +731,9 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         resumen: dict[str, Any] = {"simulacion": simulacion, "zonas": {}}
 
         # 1. ET₀ del periodo y lluvia efectiva
+        self._integrar_lluvia()  # la lluvia hasta este mismo minuto
         et0_periodo = float(self._estado["et0_acumulada"])
+        lluvia_bruta, fuente_lluvia = self._lluvia_periodo()
         lluvia = self._lluvia_efectiva()
         maximo = float(self._opt(CONF_DEFICIT_MAXIMO, DEFECTO_DEFICIT_MAXIMO))
 
@@ -640,6 +746,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._estado["et0_periodo_anterior"] = round(et0_periodo, 2)
         self._estado["et0_acumulada"] = 0.0
+        self._estado["lluvia_acumulada"] = 0.0
         self._estado["ultimo_ciclo"] = dt_util.utcnow().isoformat()
         if programado:
             self._estado["ultimo_ciclo_programado"] = self._estado["ultimo_ciclo"]
@@ -647,6 +754,8 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         resumen["et0_periodo"] = round(et0_periodo, 2)
         resumen["lluvia_efectiva"] = lluvia
+        resumen["lluvia_medida"] = round(lluvia_bruta, 2)
+        resumen["fuente_lluvia"] = fuente_lluvia
 
         # 2. Protección por helada — el déficit se conserva
         temp = _num(self.hass.states.get(op[CONF_SENSOR_TEMP]), 99.0)
@@ -661,15 +770,31 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_refresh()
             return resumen
 
-        # 3. Aplazamiento por lluvia prevista, como máximo un día
+        # 3. Aplazamiento por lluvia prevista, como máximo un día. Aplaza
+        # tanto la cantidad prevista como la probabilidad sostenida: con AEMET
+        # la cantidad casi nunca llega al umbral aunque luego llueva.
         prevista = await self._lluvia_prevista()
-        resumen["lluvia_prevista"] = prevista
+        resumen["lluvia_prevista"] = prevista["mm"]
+        resumen["horas_lluvia_probable"] = prevista["horas_probables"]
+        resumen["probabilidad_lluvia_max"] = prevista["probabilidad_max"]
         umbral_prevista = float(self._opt(CONF_LLUVIA_PREVISTA, DEFECTO_LLUVIA_PREVISTA))
-        if prevista >= umbral_prevista and not self._estado.get("aplazado_lluvia"):
+        umbral_prob = float(self._opt(CONF_PROBABILIDAD_PREVISTA, DEFECTO_PROBABILIDAD_PREVISTA))
+        horas_min = int(self._opt(CONF_HORAS_PROBABLES, DEFECTO_HORAS_PROBABLES))
+        por_cantidad = prevista["mm"] >= umbral_prevista
+        por_probabilidad = 0 < horas_min <= prevista["horas_probables"]
+        if (por_cantidad or por_probabilidad) and not self._estado.get("aplazado_lluvia"):
             self._estado["aplazado_lluvia"] = True
             await self._guardar()
+            if por_cantidad:
+                motivo = f"{prevista['mm']} mm previstos"
+            else:
+                motivo = (
+                    f"{prevista['horas_probables']} h con probabilidad de lluvia de "
+                    f"{umbral_prob:g} % o más (hasta {prevista['probabilidad_max']} %; "
+                    f"{prevista['mm']} mm previstos)"
+                )
             await self._avisar(
-                f"🌧 Riego aplazado 24 h: {prevista} mm previstos. "
+                f"🌧 Riego aplazado 24 h: {motivo}. "
                 "Los déficits se conservan; si no llueve, mañana se riega."
             )
             resumen["resultado"] = "aplazado_lluvia"
@@ -882,6 +1007,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "ultimo_riego": self.runtime(zid).get("ultimo_riego"),
             }
 
+        lluvia_medida, lluvia_fuente = self._lluvia_periodo()
         return {
             "et0_instantanea": round(resultado.et0, 3) if resultado else None,
             "et0_detalle": {
@@ -898,6 +1024,8 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "et0_acumulada": round(self._estado["et0_acumulada"], 3),
             "et0_periodo_anterior": self._estado["et0_periodo_anterior"],
             "lluvia_efectiva": self._lluvia_efectiva(),
+            "lluvia_medida": round(lluvia_medida, 2),
+            "lluvia_fuente": lluvia_fuente,
             "aplazado_lluvia": bool(self._estado.get("aplazado_lluvia")),
             "simulacion": self.simulacion,
             "proximo_ciclo": self._proximo,

@@ -14,12 +14,16 @@ Historial de decisiones, hallazgos de la revisión y plan de migración:
 - **ET₀ horaria FAO-56** con radiación extraterrestre calculada, corrección
   de viento a 2 m, onda larga real y flujo de calor del suelo.
 - **Déficit por zona**: `déficit += ET₀ × Kc × factor − lluvia efectiva`.
+  Con un contador de lluvia total, la lluvia se mide exactamente entre un
+  ciclo y el siguiente, igual que la ET₀; sin él, se usa la de las últimas
+  24 h.
 - **Dosis volumétrica**: `litros = déficit × m²`, acotada por el techo de
   seguridad de la zona.
 - **Hora de inicio calculada hacia atrás desde el amanecer**, estimando la
   duración con el caudal que aprende de cada zona.
-- **Protecciones**: helada, lluvia prevista (aplazamiento de un día) y
-  válvula en fallo — en los tres casos el déficit se conserva.
+- **Protecciones**: helada, lluvia prevista (aplazamiento de un día, por
+  milímetros previstos o por horas con probabilidad alta) y válvula en fallo
+  — en los tres casos el déficit se conserva.
 - **Modo simulación**: calcula y avisa, pero no envía nada a las válvulas.
 - **Estadísticas de temporada** por zona, con `state_class` para el
   histórico a largo plazo.

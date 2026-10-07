@@ -11,6 +11,7 @@
           "sensor_viento": "Velocidad del viento",
           "sensor_presion": "Presión atmosférica ABSOLUTA",
           "sensor_lluvia_24h": "Lluvia acumulada 24 h (mm)",
+          "sensor_lluvia_total": "Contador de lluvia total (mm)",
           "altura_anemometro": "Altura del anemómetro",
           "viento_minimo": "Viento mínimo para el cálculo",
           "factor_radiacion": "Factor de calibración del piranómetro",
@@ -25,7 +26,9 @@
           "sensor_radiacion": "Indica este o el de iluminancia. Si tienes los dos, este tiene prioridad.",
           "sensor_iluminancia": "Alternativa para sensores que solo dan lux. Ojo: si tu entidad de lux ya se calcula multiplicando la radiación por un factor, no es una medida independiente y da igual cuál elijas.",
           "factor_lux": "Conversión de lux a W/m². 126,7 es el valor de las estaciones Ecowitt y el habitual para luz solar.",
-          "sensor_presion": "La ABSOLUTA (la del emplazamiento), no la relativa reducida a nivel del mar. En Ecowitt, 'baromabsin' y no 'baromrelin'. Si lo dejas vacío se estima a partir de la altitud configurada en Home Assistant."
+          "sensor_presion": "La ABSOLUTA (la del emplazamiento), no la relativa reducida a nivel del mar. En Ecowitt, 'baromabsin' y no 'baromrelin'. Si lo dejas vacío se estima a partir de la altitud configurada en Home Assistant.",
+          "sensor_lluvia_24h": "Solo se usa si no hay contador total, o en el primer ciclo después de configurarlo: su ventana de 24 h no coincide con el periodo entre ciclos.",
+          "sensor_lluvia_total": "Un contador que solo sube, como la lluvia total o anual de la estación. Con él la lluvia se mide exactamente entre un ciclo y el siguiente, igual que la ET₀. Recomendado."
         }
       },
       "prevision": {
@@ -36,13 +39,18 @@
           "forecast_tipo": "Tipo de previsión",
           "forecast_horas": "Horizonte a considerar",
           "lluvia_prevista_umbral": "Lluvia prevista que aplaza el riego",
+          "lluvia_probabilidad_umbral": "Probabilidad que cuenta como lluvia probable",
+          "lluvia_horas_probables": "Horas de lluvia probable que aplazan el riego",
           "lluvia_minima": "Lluvia mínima efectiva",
           "lluvia_cap": "Lluvia efectiva máxima por ciclo",
           "temp_helada": "Temperatura por debajo de la cual no se riega"
         },
         "data_description": {
           "lluvia_minima": "Por debajo de este valor la lluvia no se descuenta del déficit: no llega a la zona radicular.",
-          "lluvia_cap": "Tope de lluvia descontable en un ciclo, para que un chaparrón no ponga el déficit a cero varios días."
+          "lluvia_cap": "Tope de lluvia descontable en un ciclo, para que un chaparrón no ponga el déficit a cero varios días.",
+          "lluvia_prevista_umbral": "Milímetros sumados en el horizonte. AEMET suele repartir la lluvia a 0,1 mm/h, así que este criterio casi nunca aplaza por sí solo.",
+          "lluvia_probabilidad_umbral": "Una hora de la previsión cuenta como lluvia probable si su probabilidad llega a este valor.",
+          "lluvia_horas_probables": "Aplaza si en el horizonte hay al menos estas horas de lluvia probable. 0 desactiva este criterio. Con previsión diaria, cada día probable cuenta como 24 h."
         }
       },
       "ciclo": {
@@ -130,6 +138,7 @@
           "sensor_viento": "Velocidad del viento",
           "sensor_presion": "Presión atmosférica ABSOLUTA",
           "sensor_lluvia_24h": "Lluvia acumulada 24 h (mm)",
+          "sensor_lluvia_total": "Contador de lluvia total (mm)",
           "altura_anemometro": "Altura del anemómetro",
           "viento_minimo": "Viento mínimo para el cálculo",
           "factor_radiacion": "Factor de calibración del piranómetro",
@@ -141,7 +150,9 @@
           "sensor_radiacion": "Indica este o el de iluminancia. Si tienes los dos, este tiene prioridad.",
           "sensor_iluminancia": "Alternativa para sensores que solo dan lux. Ojo: si tu entidad de lux ya se calcula multiplicando la radiación por un factor, no es una medida independiente y da igual cuál elijas.",
           "factor_lux": "Conversión de lux a W/m². 126,7 es el valor de las estaciones Ecowitt y el habitual para luz solar.",
-          "sensor_presion": "La ABSOLUTA (la del emplazamiento), no la relativa reducida a nivel del mar. En Ecowitt, 'baromabsin' y no 'baromrelin'. Si lo dejas vacío se estima a partir de la altitud configurada en Home Assistant."
+          "sensor_presion": "La ABSOLUTA (la del emplazamiento), no la relativa reducida a nivel del mar. En Ecowitt, 'baromabsin' y no 'baromrelin'. Si lo dejas vacío se estima a partir de la altitud configurada en Home Assistant.",
+          "sensor_lluvia_24h": "Solo se usa si no hay contador total, o en el primer ciclo después de configurarlo: su ventana de 24 h no coincide con el periodo entre ciclos.",
+          "sensor_lluvia_total": "Un contador que solo sube, como la lluvia total o anual de la estación. Con él la lluvia se mide exactamente entre un ciclo y el siguiente, igual que la ET₀. Recomendado."
         }
       },
       "prevision": {
@@ -151,9 +162,18 @@
           "forecast_tipo": "Tipo de previsión",
           "forecast_horas": "Horizonte a considerar",
           "lluvia_prevista_umbral": "Lluvia prevista que aplaza el riego",
+          "lluvia_probabilidad_umbral": "Probabilidad que cuenta como lluvia probable",
+          "lluvia_horas_probables": "Horas de lluvia probable que aplazan el riego",
           "lluvia_minima": "Lluvia mínima efectiva",
           "lluvia_cap": "Lluvia efectiva máxima por ciclo",
           "temp_helada": "Temperatura por debajo de la cual no se riega"
+        },
+        "data_description": {
+          "lluvia_minima": "Por debajo de este valor la lluvia no se descuenta del déficit: no llega a la zona radicular.",
+          "lluvia_cap": "Tope de lluvia descontable en un ciclo, para que un chaparrón no ponga el déficit a cero varios días.",
+          "lluvia_prevista_umbral": "Milímetros sumados en el horizonte. AEMET suele repartir la lluvia a 0,1 mm/h, así que este criterio casi nunca aplaza por sí solo.",
+          "lluvia_probabilidad_umbral": "Una hora de la previsión cuenta como lluvia probable si su probabilidad llega a este valor.",
+          "lluvia_horas_probables": "Aplaza si en el horizonte hay al menos estas horas de lluvia probable. 0 desactiva este criterio. Con previsión diaria, cada día probable cuenta como 24 h."
         }
       },
       "ciclo": {
