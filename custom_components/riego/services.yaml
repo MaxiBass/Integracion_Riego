@@ -68,10 +68,12 @@ ajustar_deficit:
         boolean:
 
 saltar_dia:
-  name: Saltar el próximo ciclo
+  name: Saltar el próximo riego
   description: >-
-    Marca el sistema como aplazado, de modo que el próximo ciclo solo acumule
-    déficit sin regar. Se limpia solo en el ciclo siguiente.
+    Enciende el interruptor «Saltar el próximo riego»: el próximo ciclo
+    programado solo acumula déficit, sin regar, y el interruptor se apaga solo.
+    Para deshacerlo, apaga el interruptor. Un ciclo lanzado a mano con
+    riego.ejecutar_ciclo riega igualmente.
 
 reiniciar_temporada:
   name: Reiniciar contadores de temporada

@@ -55,6 +55,8 @@ const SISTEMA = [
   "sensor.balance_hidrico_ultimo_ciclo",
   "binary_sensor.balance_hidrico_aplazado_por_lluvia_prevista",
   "switch.balance_hidrico_modo_simulacion",
+  "switch.balance_hidrico_saltar_el_proximo_riego",
+  "number.balance_hidrico_probabilidad_de_lluvia",
 ];
 
 const porZona = (z) => [
@@ -193,6 +195,23 @@ for (const zid of Object.keys(ZONAS)) {
   }
 }
 
+// 3b. Los dos mandos del sistema: saltar el próximo riego con toggle y la
+// probabilidad de lluvia con botones, en el Resumen y en el Detalle.
+const MANDOS = [
+  ["switch.balance_hidrico_saltar_el_proximo_riego", "toggle"],
+  ["number.balance_hidrico_probabilidad_de_lluvia", "numeric-input"],
+];
+for (const [vista, nombre] of [[resumen, "Resumen"], [detalle, "Detalle"]]) {
+  for (const [entidad, tipo] of MANDOS) {
+    const tile = [...tarjetas(vista)].find((c) => c.type === "tile" && c.entity === entidad);
+    assert.ok(tile, `falta ${entidad} en ${nombre}`);
+    assert.ok(
+      (tile.features || []).some((f) => f.type === tipo),
+      `${entidad} en ${nombre} debería llevar ${tipo}`
+    );
+  }
+}
+
 // 4. «Previsto» es una proyección EN VIVO (§7.18): usa el ET₀ acumulado del
 // sistema y el déficit/Kc/factor de cada zona, no el volumen_objetivo
 // congelado de la integración, que solo se recalcula una vez al día.
@@ -239,6 +258,7 @@ assert.ok(markdown, "falta la tarjeta de resumen");
 for (const marcador of [
   "SENSOR_PROXIMO",
   "SWITCH_SIM",
+  "SWITCH_SALTAR",
   "BINARY_APLAZADO",
   "SENSOR_ET0_ANTERIOR",
   "SENSOR_ET0_ACUM",
@@ -247,6 +267,10 @@ for (const marcador of [
   assert.ok(!markdown.content.includes(marcador), `marcador sin sustituir: ${marcador}`);
 }
 assert.ok(!markdown.content.includes("''"), "hay un states('') por una entidad no encontrada");
+assert.ok(
+  markdown.content.includes("is_state('switch.balance_hidrico_saltar_el_proximo_riego','on')"),
+  "la cabecera debe avisar de que el próximo riego está saltado"
+);
 for (const nombre of Object.values(ZONAS)) {
   assert.ok(markdown.content.includes(`'${nombre}'`), `${nombre} falta en la tabla`);
 }

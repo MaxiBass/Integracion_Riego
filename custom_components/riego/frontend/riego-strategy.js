@@ -47,7 +47,11 @@ const ORDEN_ZONA = [
 
 // Los number con pocos pasos se manejan bien a botones; superficie y techo
 // tienen rangos amplios y se teclean mejor en una tarjeta "entities".
-const NUMEROS_CON_BOTONES = ["umbral_de_riego", "coeficiente_de_ajuste"];
+const NUMEROS_CON_BOTONES = [
+  "umbral_de_riego",
+  "coeficiente_de_ajuste",
+  "probabilidad_de_lluvia",
+];
 
 /** Entidades de la integración, agrupadas por dispositivo. */
 function agrupar(hass) {
@@ -161,6 +165,8 @@ function plantillaResumen(zonas) {
 {%- endfor -%}
 {% if is_state('SWITCH_SIM','on') %}### 🧪 Modo simulación activo
 No se enviará agua a las válvulas.
+{% elif is_state('SWITCH_SALTAR','on') %}### ⏭️ Próximo riego saltado
+El ciclo solo sumará déficit; el siguiente riega con normalidad.
 {% elif is_state('BINARY_APLAZADO','on') %}### 🌧️ Ciclo aplazado por lluvia prevista
 El déficit se conserva para el próximo ciclo.
 {% elif ns.total > 0 %}### 💧 {{ ns.total }} L previstos
@@ -279,6 +285,7 @@ function vistaResumen(sistema, zonas) {
   const contenido = plantillaResumen(zonas)
     .replaceAll("SENSOR_PROXIMO", s("proximo_ciclo"))
     .replaceAll("SWITCH_SIM", s("simulacion"))
+    .replaceAll("SWITCH_SALTAR", s("saltar_el_proximo_riego"))
     .replaceAll("BINARY_APLAZADO", s("aplazado_por_lluvia_prevista"))
     .replaceAll("SENSOR_ET0_ANTERIOR", s("et0_del_periodo_anterior"))
     // ET0_ACUM y LLUVIA aparecen dos veces: una para la proyección en vivo,
@@ -293,6 +300,26 @@ function vistaResumen(sistema, zonas) {
     s("simulacion"),
   ].filter(Boolean);
 
+  // Los dos mandos del día a día, bajo la cabecera: saltar el próximo
+  // riego y la probabilidad de lluvia que aplaza el ciclo.
+  const mandos = [];
+  const saltar = s("saltar_el_proximo_riego");
+  const probabilidad = s("probabilidad_de_lluvia");
+  if (saltar) {
+    mandos.push(tarjeta(saltar, {
+      name: "Saltar próximo riego",
+      features: TOGGLE,
+      grid_options: { columns: COLS / 2 },
+    }));
+  }
+  if (probabilidad) {
+    mandos.push(tarjeta(probabilidad, {
+      name: "Probabilidad que aplaza",
+      features: BOTONES,
+      grid_options: { columns: COLS / 2 },
+    }));
+  }
+
   const secciones = [
     {
       type: "grid",
@@ -300,6 +327,7 @@ function vistaResumen(sistema, zonas) {
       cards: [
         encabezado("Riego por balance hídrico", "mdi:sprinkler-variant", "title", badges),
         { type: "markdown", grid_options: LLENO, content: contenido },
+        ...mandos,
       ],
     },
   ];
@@ -437,6 +465,7 @@ function seccionSistema(hass, entidades) {
   );
   const interruptores = entidades.filter((e) => e.startsWith("switch."));
   const binarios = entidades.filter((e) => e.startsWith("binary_sensor."));
+  const numeros = entidades.filter((e) => e.startsWith("number."));
 
   const n = (e) => nombreCorto(hass, e, "Balance Hídrico");
   const cards = [
@@ -444,6 +473,7 @@ function seccionSistema(hass, entidades) {
     ...sensores.map((e) => tarjeta(e, { name: n(e) })),
     ...binarios.map((e) => tarjeta(e, { name: n(e) })),
     ...interruptores.map((e) => tarjeta(e, { name: n(e), features: TOGGLE })),
+    ...numeros.map((e) => tarjeta(e, { name: n(e), features: BOTONES })),
   ];
 
   const acumulada = porSufijo(entidades, "et0_acumulada_del_periodo");

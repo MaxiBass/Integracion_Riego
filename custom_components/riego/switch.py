@@ -1,4 +1,4 @@
-"""Interruptores de Riego: simulación global y habilitación por zona."""
+"""Interruptores de Riego: simulación, saltar el próximo riego y habilitación por zona."""
 
 from __future__ import annotations
 
@@ -18,7 +18,10 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinador: RiegoCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entidades: list[SwitchEntity] = [ModoSimulacion(coordinador)]
+    entidades: list[SwitchEntity] = [
+        ModoSimulacion(coordinador),
+        SaltarProximoRiego(coordinador),
+    ]
     for zona in coordinador.zonas:
         entidades.append(
             ZonaHabilitada(coordinador, zona[Z_ID], zona.get(Z_NOMBRE, zona[Z_ID]))
@@ -44,6 +47,30 @@ class ModoSimulacion(EntidadSistema, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.set_simulacion(False)
+
+
+class SaltarProximoRiego(EntidadSistema, SwitchEntity):
+    """Encendido, el próximo ciclo programado solo suma déficit, sin regar.
+
+    Se apaga solo después de ese ciclo. Es un interruptor y no un botón para
+    que se vea si hay un salto pendiente y se pueda deshacer.
+    """
+
+    _attr_name = "Saltar el próximo riego"
+    _attr_icon = "mdi:skip-next-circle-outline"
+
+    def __init__(self, coordinador: RiegoCoordinator) -> None:
+        super().__init__(coordinador, "saltar_proximo")
+
+    @property
+    def is_on(self) -> bool:
+        return bool((self.coordinator.data or {}).get("saltar_proximo"))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.set_saltar_proximo(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.set_saltar_proximo(False)
 
 
 class ZonaHabilitada(EntidadZona, SwitchEntity):

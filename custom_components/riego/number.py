@@ -1,4 +1,4 @@
-"""Parámetros ajustables en caliente, uno por zona."""
+"""Parámetros ajustables en caliente: los de cada zona y la probabilidad de lluvia."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DEFECTO_FACTOR_ZONA,
+    DEFECTO_PROBABILIDAD_PREVISTA,
     DEFECTO_M2,
     DEFECTO_TECHO,
     DEFECTO_UMBRAL,
@@ -27,7 +28,7 @@ from .const import (
     Z_UMBRAL,
 )
 from .coordinator import RiegoCoordinator
-from .entity import EntidadZona
+from .entity import EntidadSistema, EntidadZona
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -94,12 +95,42 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinador: RiegoCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entidades = [
+    entidades: list[NumberEntity] = [ProbabilidadLluvia(coordinador)]
+    entidades += [
         NumeroZona(coordinador, zona[Z_ID], zona.get(Z_NOMBRE, zona[Z_ID]), d)
         for zona in coordinador.zonas
         for d in NUMEROS
     ]
     async_add_entities(entidades)
+
+
+class ProbabilidadLluvia(EntidadSistema, NumberEntity):
+    """Probabilidad desde la que una hora de la previsión es lluvia probable.
+
+    El ciclo se aplaza si hay bastantes horas así (§7.23 en DECISIONES.md).
+    """
+
+    _attr_name = "Probabilidad de lluvia"
+    _attr_icon = "mdi:weather-pouring"
+    _attr_native_unit_of_measurement = "%"
+    _attr_native_min_value = 10
+    _attr_native_max_value = 100
+    _attr_native_step = 5
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinador: RiegoCoordinator) -> None:
+        super().__init__(coordinador, "probabilidad_lluvia")
+
+    @property
+    def native_value(self) -> float:
+        return float(
+            (self.coordinator.data or {}).get(
+                "probabilidad_lluvia", DEFECTO_PROBABILIDAD_PREVISTA
+            )
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.set_probabilidad_lluvia(value)
 
 
 class NumeroZona(EntidadZona, NumberEntity):

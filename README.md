@@ -24,6 +24,8 @@ Historial de decisiones, hallazgos de la revisión y plan de migración:
 - **Protecciones**: helada, lluvia prevista (aplazamiento de un día, por
   milímetros previstos o por horas con probabilidad alta) y válvula en fallo
   — en los tres casos el déficit se conserva.
+- **Mandos en vivo**: saltar el próximo riego con un interruptor, y la
+  probabilidad de lluvia que aplaza el ciclo, sin pasar por Configurar.
 - **Modo simulación**: calcula y avisa, pero no envía nada a las válvulas.
 - **Estadísticas de temporada** por zona, con `state_class` para el
   histórico a largo plazo.
@@ -76,7 +78,7 @@ los `switch` con `toggle`.
 | `riego.ejecutar_ciclo` | Lanza el ciclo ahora. Devuelve el detalle de lo hecho. |
 | `riego.regar_zona` | Dosis puntual a una zona, al margen del balance. |
 | `riego.ajustar_deficit` | Fija o corrige el déficit de una zona. |
-| `riego.saltar_dia` | El próximo ciclo solo acumula, sin regar. |
+| `riego.saltar_dia` | El próximo ciclo programado solo acumula, sin regar (enciende «Saltar el próximo riego»). |
 | `riego.reiniciar_temporada` | Pone a cero los litros de temporada. |
 
 Además, cada hito del ciclo dispara el evento `riego_evento`, por si

@@ -187,24 +187,21 @@ def test_config_flow() -> None:
                   f"{nombre}: el valor por defecto {defecto} cabe en "
                   f"[{num.get('min')}, {num.get('max')}]")
 
-    # Aplazamiento por probabilidad: los dos campos existen, su valor por
-    # defecto cabe en el selector y las horas admiten 0, que lo desactiva.
+    # Aplazamiento por probabilidad: las horas están en el formulario, con su
+    # valor por defecto dentro del selector y admitiendo 0, que lo desactiva.
+    # La probabilidad NO: es un number en vivo del dispositivo, y tenerla en
+    # los dos sitios haría que el control tapase en silencio lo configurado.
     from custom_components.riego.config_flow import esquema_prevision
-    from custom_components.riego.const import (
-        DEFECTO_HORAS_PROBABLES, DEFECTO_PROBABILIDAD_PREVISTA,
-    )
+    from custom_components.riego.const import DEFECTO_HORAS_PROBABLES
 
     prevision = {c["name"]: c for c in to_field_list(esquema_prevision({}),
                                                      custom_serializer=cv.custom_serializer)}
-    for nombre, defecto in (("lluvia_probabilidad_umbral", DEFECTO_PROBABILIDAD_PREVISTA),
-                            ("lluvia_horas_probables", DEFECTO_HORAS_PROBABLES)):
-        num = prevision.get(nombre, {}).get("selector", {}).get("number", {})
-        dentro = num and num["min"] <= defecto <= num["max"]
-        comprobar(bool(dentro),
-                  f"{nombre}: el valor por defecto {defecto} cabe en "
-                  f"[{num.get('min')}, {num.get('max')}]")
     horas = prevision.get("lluvia_horas_probables", {}).get("selector", {}).get("number", {})
-    comprobar(horas.get("min") == 0, "las horas de lluvia probable admiten 0, que desactiva el criterio")
+    comprobar(bool(horas) and horas["min"] == 0 <= DEFECTO_HORAS_PROBABLES <= horas["max"],
+              f"horas de lluvia probable: admite 0 y el defecto {DEFECTO_HORAS_PROBABLES} cabe "
+              f"en [{horas.get('min')}, {horas.get('max')}]")
+    comprobar("lluvia_probabilidad_umbral" not in prevision,
+              "la probabilidad de lluvia no está en el formulario: es un control en vivo")
 
     # Ningún esquema puede tener un booleano OBLIGATORIO: ha-form considera
     # que un booleano required con valor false está «sin rellenar» y bloquea
@@ -736,12 +733,52 @@ def _coordinador() -> None:
     comprobar(r["resultado"] == "aplazado_lluvia" and "6.0 mm previstos" in ultimo_aviso(hass),
               "la cantidad sigue aplazando por sí sola: 6 mm previstos al 40 %")
 
+    # La probabilidad se ajusta en vivo con su control, sin recargar nada
+    c, hass = con_prevision(horaria(75))
+    asyncio.run(c.set_probabilidad_lluvia(80))
+    comprobar(ciclo(c)["resultado"] == "completado", "con el control al 80 %, 6 h al 75 % ya no aplazan")
+    c, hass = con_prevision(horaria(75))
+    asyncio.run(c.set_probabilidad_lluvia(75))
+    comprobar(ciclo(c)["resultado"] == "aplazado_lluvia", "con el control al 75 %, sí")
+
     diaria = {"weather.aemet": {"forecast": [{"precipitation_probability": 80},
                                              {"precipitation_probability": 0}]}}
     c, hass = con_prevision(diaria, forecast_tipo="daily")
     r = ciclo(c)
     comprobar(r["resultado"] == "aplazado_lluvia" and r.get("horas_lluvia_probable") == 24,
               "con previsión diaria, un día al 80 % cuenta como 24 h probables")
+
+    # 6d. Saltar el próximo riego. Hasta v0.4.0 el servicio marcaba «ya
+    # aplazado», que el ciclo lee como «regar pase lo que pase»: regaba igual.
+    def programado(c):
+        publicados.clear()
+        with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
+            return asyncio.run(c.ejecutar_ciclo(programado=True))
+
+    c, hass = construir()
+    c._estado["et0_acumulada"] = 3.10
+    asyncio.run(c.set_saltar_proximo(True))
+    r = programado(c)
+    comprobar(r["resultado"] == "saltado" and not publicados,
+              "con «Saltar el próximo riego» el ciclo programado no riega")
+    comprobar(casi(c.deficit("frutales"), 2.2, 0.01),
+              f"el déficit del periodo se suma y se conserva: {c.deficit('frutales')} mm")
+    comprobar(not c._estado["saltar_proximo"], "el interruptor se apaga solo tras ese ciclo")
+    comprobar(not c._estado["aplazado_lluvia"], "saltar no se hace pasar por un aplazamiento por lluvia")
+    avisos = [ll.args[2]["message"] for ll in hass.services.async_call.call_args_list
+              if ll.args[:2] == ("notify", "send_message")]
+    comprobar(bool(avisos) and "saltado" in avisos[-1], "se avisa del salto")
+    r = programado(c)
+    comprobar(r["resultado"] == "completado" and bool(publicados), "el ciclo siguiente riega")
+
+    c, hass = construir()
+    c._estado["et0_acumulada"] = 3.10
+    asyncio.run(c.set_saltar_proximo(True))
+    publicados.clear()
+    with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
+        r = asyncio.run(c.ejecutar_ciclo())  # a mano
+    comprobar(r["resultado"] == "completado" and c._estado["saltar_proximo"],
+              "un ciclo lanzado a mano riega y deja el salto pendiente para el programado")
 
     # 7. Hora de inicio: terminar al amanecer
     c, hass = construir()

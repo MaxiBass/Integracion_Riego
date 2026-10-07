@@ -34,7 +34,6 @@ from .const import (
     CONF_MODO_INICIO,
     CONF_NOTIFY,
     CONF_OFFSET_AMANECER,
-    CONF_PROBABILIDAD_PREVISTA,
     CONF_SENSOR_HUMEDAD,
     CONF_SENSOR_ILUMINANCIA,
     CONF_SENSOR_LLUVIA,
@@ -66,7 +65,6 @@ from .const import (
     DEFECTO_M2,
     DEFECTO_MARGEN_DURACION,
     DEFECTO_OFFSET_AMANECER,
-    DEFECTO_PROBABILIDAD_PREVISTA,
     DEFECTO_TECHO,
     DEFECTO_TEMP_HELADA,
     DEFECTO_UMBRAL,
@@ -183,10 +181,6 @@ def esquema_prevision(valores: dict[str, Any]) -> vol.Schema:
                 CONF_LLUVIA_PREVISTA,
                 default=valores.get(CONF_LLUVIA_PREVISTA, DEFECTO_LLUVIA_PREVISTA),
             ): _numero(0.5, 50, 0.5, "mm"),
-            vol.Required(
-                CONF_PROBABILIDAD_PREVISTA,
-                default=valores.get(CONF_PROBABILIDAD_PREVISTA, DEFECTO_PROBABILIDAD_PREVISTA),
-            ): _numero(10, 100, 5, "%"),
             vol.Required(
                 CONF_HORAS_PROBABLES,
                 default=valores.get(CONF_HORAS_PROBABLES, DEFECTO_HORAS_PROBABLES),
