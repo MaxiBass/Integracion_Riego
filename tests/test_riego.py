@@ -187,21 +187,34 @@ def test_config_flow() -> None:
                   f"{nombre}: el valor por defecto {defecto} cabe en "
                   f"[{num.get('min')}, {num.get('max')}]")
 
-    # Aplazamiento por probabilidad: las horas están en el formulario, con su
-    # valor por defecto dentro del selector y admitiendo 0, que lo desactiva.
-    # La probabilidad NO: es un number en vivo del dispositivo, y tenerla en
-    # los dos sitios haría que el control tapase en silencio lo configurado.
-    from custom_components.riego.config_flow import esquema_prevision
-    from custom_components.riego.const import DEFECTO_HORAS_PROBABLES
+    # Aplazamiento por probabilidad: los dos campos están en el formulario,
+    # con su valor por defecto dentro del selector; las horas admiten 0, que
+    # desactiva el criterio.
+    from custom_components.riego.config_flow import esquema_ciclo, esquema_prevision
+    from custom_components.riego.const import (
+        DEFECTO_HORAS_PROBABLES, DEFECTO_PROBABILIDAD_PREVISTA,
+    )
 
     prevision = {c["name"]: c for c in to_field_list(esquema_prevision({}),
                                                      custom_serializer=cv.custom_serializer)}
+    for nombre, defecto in (("lluvia_probabilidad_umbral", DEFECTO_PROBABILIDAD_PREVISTA),
+                            ("lluvia_horas_probables", DEFECTO_HORAS_PROBABLES)):
+        num = prevision.get(nombre, {}).get("selector", {}).get("number", {})
+        dentro = num and num["min"] <= defecto <= num["max"]
+        comprobar(bool(dentro),
+                  f"{nombre}: el valor por defecto {defecto} cabe en "
+                  f"[{num.get('min')}, {num.get('max')}]")
     horas = prevision.get("lluvia_horas_probables", {}).get("selector", {}).get("number", {})
-    comprobar(bool(horas) and horas["min"] == 0 <= DEFECTO_HORAS_PROBABLES <= horas["max"],
-              f"horas de lluvia probable: admite 0 y el defecto {DEFECTO_HORAS_PROBABLES} cabe "
-              f"en [{horas.get('min')}, {horas.get('max')}]")
-    comprobar("lluvia_probabilidad_umbral" not in prevision,
-              "la probabilidad de lluvia no está en el formulario: es un control en vivo")
+    comprobar(horas.get("min") == 0, "las horas de lluvia probable admiten 0, que desactiva el criterio")
+
+    # Cada cosa se cambia en un solo sitio (§7.25): la simulación está en el
+    # alta, para empezar con ella puesta, pero no en las opciones, donde la
+    # taparía su interruptor.
+    def nombres(esquema):
+        return {c["name"] for c in to_field_list(esquema, custom_serializer=cv.custom_serializer)}
+    comprobar("simulacion" in nombres(esquema_ciclo({}, alta=True)), "el alta pregunta por la simulación")
+    comprobar("simulacion" not in nombres(esquema_ciclo({})),
+              "las opciones no tienen simulación: se cambia con su interruptor")
 
     # Ningún esquema puede tener un booleano OBLIGATORIO: ha-form considera
     # que un booleano required con valor false está «sin rellenar» y bloquea
@@ -213,7 +226,7 @@ def test_config_flow() -> None:
     obligatorios = []
     for nombre, constructor in (("meteo", cf_mod.esquema_meteo),
                                 ("prevision", cf_mod.esquema_prevision),
-                                ("ciclo", cf_mod.esquema_ciclo),
+                                ("ciclo", lambda v: cf_mod.esquema_ciclo(v, alta=True)),
                                 ("zona", cf_mod.esquema_zona)):
         for campo in to_field_list(constructor({}), custom_serializer=cv.custom_serializer):
             es_bool = campo.get("type") == "boolean" or "boolean" in campo.get("selector", {})
@@ -336,7 +349,8 @@ def test_traducciones() -> None:
 
     formularios = {
         ("config", "user"): cf.esquema_meteo, ("config", "prevision"): cf.esquema_prevision,
-        ("config", "ciclo"): cf.esquema_ciclo, ("config", "zona"): cf.esquema_zona,
+        ("config", "ciclo"): lambda v: cf.esquema_ciclo(v, alta=True),
+        ("config", "zona"): cf.esquema_zona,
         ("options", "meteo"): cf.esquema_meteo, ("options", "prevision"): cf.esquema_prevision,
         ("options", "ciclo"): cf.esquema_ciclo, ("options", "editar_zona"): cf.esquema_zona,
     }
@@ -733,13 +747,11 @@ def _coordinador() -> None:
     comprobar(r["resultado"] == "aplazado_lluvia" and "6.0 mm previstos" in ultimo_aviso(hass),
               "la cantidad sigue aplazando por sí sola: 6 mm previstos al 40 %")
 
-    # La probabilidad se ajusta en vivo con su control, sin recargar nada
-    c, hass = con_prevision(horaria(75))
-    asyncio.run(c.set_probabilidad_lluvia(80))
-    comprobar(ciclo(c)["resultado"] == "completado", "con el control al 80 %, 6 h al 75 % ya no aplazan")
-    c, hass = con_prevision(horaria(75))
-    asyncio.run(c.set_probabilidad_lluvia(75))
-    comprobar(ciclo(c)["resultado"] == "aplazado_lluvia", "con el control al 75 %, sí")
+    # La probabilidad que cuenta se cambia en «Configurar»
+    c, hass = con_prevision(horaria(75), lluvia_probabilidad_umbral=80)
+    comprobar(ciclo(c)["resultado"] == "completado", "con el umbral al 80 %, 6 h al 75 % ya no aplazan")
+    c, hass = con_prevision(horaria(75), lluvia_probabilidad_umbral=75)
+    comprobar(ciclo(c)["resultado"] == "aplazado_lluvia", "con el umbral al 75 %, sí")
 
     diaria = {"weather.aemet": {"forecast": [{"precipitation_probability": 80},
                                              {"precipitation_probability": 0}]}}
@@ -779,6 +791,31 @@ def _coordinador() -> None:
         r = asyncio.run(c.ejecutar_ciclo())  # a mano
     comprobar(r["resultado"] == "completado" and c._estado["saltar_proximo"],
               "un ciclo lanzado a mano riega y deja el salto pendiente para el programado")
+
+    # 6e. Ajustes tocados con los antiguos number (hasta v0.4): pasan a la
+    # configuración al arrancar, para que quitar los controles no cambie en
+    # silencio la dosis. Lo que no se tocó se queda como estaba.
+    c, hass = construir()
+    entrada = c.entry
+    hass.config_entries.async_update_entry = MagicMock(
+        side_effect=lambda e, options: setattr(e, "options", options)
+    )
+    c.runtime("frutales").update({"m2": 150.0, "factor": 0.9, "umbral": None})
+    c.runtime("aptenia")["habilitada"] = False
+    comprobar(c._migrar_ajustes_de_zona(), "hay ajustes que migrar")
+    frutales = next(z for z in entrada.options["zonas"] if z["id"] == "frutales")
+    aptenia = next(z for z in entrada.options["zonas"] if z["id"] == "aptenia")
+    comprobar(frutales["m2"] == 150.0 and frutales["factor"] == 0.9 and frutales["umbral"] == 0.5,
+              "la superficie y el coeficiente tocados pasan a la configuración; el umbral no")
+    comprobar(aptenia == next(z for z in ZONAS if z["id"] == "aptenia"),
+              "una zona sin ajustes tocados queda igual")
+    comprobar(not any(k in c.runtime("frutales") for k in ("m2", "factor", "umbral")),
+              "el almacén ya no guarda ajustes de zona")
+    comprobar(c.runtime("aptenia").get("habilitada") is False and not c.habilitada("aptenia"),
+              "el interruptor de zona habilitada sigue en el almacén")
+    c.runtime("frutales")["deficit"] = 2.0
+    comprobar(c.volumen_objetivo("frutales") == 300, "la dosis usa la superficie migrada: 2 mm × 150 m² = 300 L")
+    comprobar(not c._migrar_ajustes_de_zona(), "la migración solo ocurre una vez")
 
     # 7. Hora de inicio: terminar al amanecer
     c, hass = construir()
@@ -828,6 +865,28 @@ def _coordinador() -> None:
     comprobar(c.volumen_objetivo("frutales") == 0, "zona deshabilitada → 0 L")
 
 
+def test_entidades_retiradas() -> None:
+    """Los number retirados en v0.5.0 se borran del registro al arrancar."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    import custom_components.riego as integracion
+
+    print("\nEntidades retiradas")
+    registro = MagicMock()
+    entradas = [SimpleNamespace(entity_id=e, domain=e.split(".")[0]) for e in (
+        "number.zona_frutales_superficie", "number.zona_frutales_coeficiente_de_ajuste",
+        "sensor.zona_frutales_deficit_acumulado", "switch.zona_frutales_habilitada",
+    )]
+    with patch.object(integracion.er, "async_get", return_value=registro), \
+         patch.object(integracion.er, "async_entries_for_config_entry", return_value=entradas):
+        integracion._borrar_entidades_retiradas(MagicMock(), MagicMock(entry_id="x"))
+    borradas = sorted(ll.args[0] for ll in registro.async_remove.call_args_list)
+    comprobar(borradas == ["number.zona_frutales_coeficiente_de_ajuste", "number.zona_frutales_superficie"],
+              f"se borran los number y nada más: {borradas}")
+    comprobar("number" not in [p.value for p in integracion.PLATFORMS], "la plataforma number ya no se carga")
+
+
 if __name__ == "__main__":
     test_et0()
     test_irradiancia_desde_lux()
@@ -836,6 +895,7 @@ if __name__ == "__main__":
     try:
         test_config_flow()
         test_coordinador()
+        test_entidades_retiradas()
     except ImportError as err:
         print(f"\n  (saltadas las pruebas que necesitan Home Assistant: {err})")
 

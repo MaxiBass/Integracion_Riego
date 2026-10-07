@@ -39,6 +39,7 @@
           "forecast_tipo": "Tipo de previsión",
           "forecast_horas": "Horizonte a considerar",
           "lluvia_prevista_umbral": "Lluvia prevista que aplaza el riego",
+          "lluvia_probabilidad_umbral": "Probabilidad que cuenta como lluvia probable",
           "lluvia_horas_probables": "Horas de lluvia probable que aplazan el riego",
           "lluvia_minima": "Lluvia mínima efectiva",
           "lluvia_cap": "Lluvia efectiva máxima por ciclo",
@@ -48,7 +49,8 @@
           "lluvia_minima": "Por debajo de este valor la lluvia no se descuenta del déficit: no llega a la zona radicular.",
           "lluvia_cap": "Tope de lluvia descontable en un ciclo, para que un chaparrón no ponga el déficit a cero varios días.",
           "lluvia_prevista_umbral": "Milímetros sumados en el horizonte. AEMET suele repartir la lluvia a 0,1 mm/h, así que este criterio casi nunca aplaza por sí solo.",
-          "lluvia_horas_probables": "Aplaza si en el horizonte hay al menos estas horas de lluvia probable: las que llegan al control «Probabilidad de lluvia» del dispositivo Balance Hídrico (70 % por defecto). 0 desactiva este criterio. Con previsión diaria, cada día probable cuenta como 24 h."
+          "lluvia_probabilidad_umbral": "Una hora de la previsión cuenta como lluvia probable si su probabilidad llega a este valor.",
+          "lluvia_horas_probables": "Aplaza si en el horizonte hay al menos estas horas de lluvia probable. 0 desactiva este criterio. Con previsión diaria, cada día probable cuenta como 24 h."
         }
       },
       "ciclo": {
@@ -160,6 +162,7 @@
           "forecast_tipo": "Tipo de previsión",
           "forecast_horas": "Horizonte a considerar",
           "lluvia_prevista_umbral": "Lluvia prevista que aplaza el riego",
+          "lluvia_probabilidad_umbral": "Probabilidad que cuenta como lluvia probable",
           "lluvia_horas_probables": "Horas de lluvia probable que aplazan el riego",
           "lluvia_minima": "Lluvia mínima efectiva",
           "lluvia_cap": "Lluvia efectiva máxima por ciclo",
@@ -169,7 +172,8 @@
           "lluvia_minima": "Por debajo de este valor la lluvia no se descuenta del déficit: no llega a la zona radicular.",
           "lluvia_cap": "Tope de lluvia descontable en un ciclo, para que un chaparrón no ponga el déficit a cero varios días.",
           "lluvia_prevista_umbral": "Milímetros sumados en el horizonte. AEMET suele repartir la lluvia a 0,1 mm/h, así que este criterio casi nunca aplaza por sí solo.",
-          "lluvia_horas_probables": "Aplaza si en el horizonte hay al menos estas horas de lluvia probable: las que llegan al control «Probabilidad de lluvia» del dispositivo Balance Hídrico (70 % por defecto). 0 desactiva este criterio. Con previsión diaria, cada día probable cuenta como 24 h."
+          "lluvia_probabilidad_umbral": "Una hora de la previsión cuenta como lluvia probable si su probabilidad llega a este valor.",
+          "lluvia_horas_probables": "Aplaza si en el horizonte hay al menos estas horas de lluvia probable. 0 desactiva este criterio. Con previsión diaria, cada día probable cuenta como 24 h."
         }
       },
       "ciclo": {
@@ -182,7 +186,6 @@
           "margen_duracion": "Margen de seguridad sobre la duración estimada",
           "desfase_zonas": "Desfase entre zonas",
           "deficit_maximo": "Déficit máximo acumulable",
-          "simulacion": "Modo simulación",
           "notify_entity": "Entidad de notificación"
         }
       },

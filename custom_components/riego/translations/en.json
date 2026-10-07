@@ -36,6 +36,7 @@
           "forecast_tipo": "Forecast type",
           "forecast_horas": "Horizon to consider",
           "lluvia_prevista_umbral": "Forecast rain that defers irrigation",
+          "lluvia_probabilidad_umbral": "Probability that counts as likely rain",
           "lluvia_horas_probables": "Hours of likely rain that defer irrigation",
           "lluvia_minima": "Minimum effective rainfall",
           "lluvia_cap": "Maximum effective rainfall per cycle",
@@ -43,7 +44,8 @@
         },
         "data_description": {
           "lluvia_prevista_umbral": "Millimetres summed over the horizon. Some providers spread forecast rain at 0.1 mm/h, so this alone rarely defers.",
-          "lluvia_horas_probables": "Defers if the horizon holds at least this many hours of likely rain: hours reaching the “Probabilidad de lluvia” control on the Balance Hídrico device (70 % by default). 0 disables this rule. With a daily forecast, each likely day counts as 24 h."
+          "lluvia_probabilidad_umbral": "A forecast hour counts as likely rain when its probability reaches this value.",
+          "lluvia_horas_probables": "Defers if the horizon holds at least this many hours of likely rain. 0 disables this rule. With a daily forecast, each likely day counts as 24 h."
         }
       },
       "ciclo": {
@@ -150,6 +152,7 @@
           "forecast_tipo": "Forecast type",
           "forecast_horas": "Horizon to consider",
           "lluvia_prevista_umbral": "Forecast rain that defers irrigation",
+          "lluvia_probabilidad_umbral": "Probability that counts as likely rain",
           "lluvia_horas_probables": "Hours of likely rain that defer irrigation",
           "lluvia_minima": "Minimum effective rainfall",
           "lluvia_cap": "Maximum effective rainfall per cycle",
@@ -157,7 +160,8 @@
         },
         "data_description": {
           "lluvia_prevista_umbral": "Millimetres summed over the horizon. Some providers spread forecast rain at 0.1 mm/h, so this alone rarely defers.",
-          "lluvia_horas_probables": "Defers if the horizon holds at least this many hours of likely rain: hours reaching the “Probabilidad de lluvia” control on the Balance Hídrico device (70 % by default). 0 disables this rule. With a daily forecast, each likely day counts as 24 h."
+          "lluvia_probabilidad_umbral": "A forecast hour counts as likely rain when its probability reaches this value.",
+          "lluvia_horas_probables": "Defers if the horizon holds at least this many hours of likely rain. 0 disables this rule. With a daily forecast, each likely day counts as 24 h."
         }
       },
       "ciclo": {
@@ -170,7 +174,6 @@
           "margen_duracion": "Safety margin over the estimated duration",
           "desfase_zonas": "Stagger between zones",
           "deficit_maximo": "Maximum accumulated deficit",
-          "simulacion": "Start in simulation mode",
           "notify_entity": "Notification entity"
         },
         "data_description": {

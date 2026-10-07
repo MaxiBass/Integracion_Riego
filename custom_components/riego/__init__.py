@@ -13,6 +13,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, Z_ID
 from .entity import DISPOSITIVO_SISTEMA
@@ -22,10 +23,15 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
-    Platform.NUMBER,
     Platform.SENSOR,
     Platform.SWITCH,
 ]
+
+# Plataformas que la integración tuvo y ya no publica. Sus entidades se
+# borran del registro al arrancar; si no, quedarían para siempre como «ya no
+# las proporciona la integración». Los number de zona se retiraron en v0.5.0:
+# los ajustes se cambian solo en «Configurar» (§7.25 en DECISIONES.md).
+PLATAFORMAS_RETIRADAS = ("number",)
 
 RUTA_ESTATICA = "/riego_static"
 FICHERO_ESTRATEGIA = "riego-strategy.js"
@@ -54,6 +60,7 @@ ESQUEMA_DEFICIT = vol.Schema(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Configura una entrada de la integración."""
+    _borrar_entidades_retiradas(hass, entry)
     coordinador = RiegoCoordinator(hass, entry)
     await coordinador.async_iniciar()
 
@@ -94,6 +101,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ):
                 hass.services.async_remove(DOMAIN, servicio)
     return descargada
+
+
+def _borrar_entidades_retiradas(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    registro = er.async_get(hass)
+    for entidad in er.async_entries_for_config_entry(registro, entry.entry_id):
+        if entidad.domain in PLATAFORMAS_RETIRADAS:
+            _LOGGER.info("Se retira %s: ya no la publica la integración", entidad.entity_id)
+            registro.async_remove(entidad.entity_id)
 
 
 async def _al_actualizar_opciones(hass: HomeAssistant, entry: ConfigEntry) -> None:

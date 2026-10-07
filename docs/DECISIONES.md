@@ -1043,9 +1043,8 @@ nunca aplaza; la probabilidad sí avisa.
 
 Regla nueva: se aplaza si la cantidad prevista llega al umbral (3 mm, como
 antes) **o** si en el horizonte hay al menos 3 horas con una probabilidad del
-70 % o más. La probabilidad se ajusta con un control del dispositivo y las
-horas en Configurar (§7.24); con 0 horas el criterio de probabilidad queda
-desactivado. AEMET da la probabilidad por tramos de 6 h
+70 % o más. Las dos cifras se ajustan en Configurar (§7.25); con 0 horas el
+criterio de probabilidad queda desactivado. AEMET da la probabilidad por tramos de 6 h
 (00–06, 06–12, 12–18 y 18–24), así que en la práctica basta un tramo al 70 %
 o más. Con previsión diaria, cada día probable cuenta como 24 h.
 
@@ -1126,7 +1125,8 @@ anulaba un posible aplazamiento por lluvia de ese día y dejaba el panel en
 
 Ahora hay un interruptor **«Saltar el próximo riego»**
 (`switch.balance_hidrico_saltar_el_proximo_riego`), en el dispositivo Balance
-Hídrico y bajo la cabecera del Resumen, con una marca propia:
+Hídrico y bajo la cabecera del Resumen del panel automático, con una marca
+propia:
 
 - Es un interruptor y no un botón para que se vea si hay un salto pendiente y
   se pueda deshacer. Se apaga solo después del ciclo saltado.
@@ -1137,20 +1137,51 @@ Hídrico y bajo la cabecera del Resumen, con una marca propia:
 - No toca `aplazado_lluvia`: saltar no cuenta como aplazamiento por lluvia.
 - `riego.saltar_dia` sigue existiendo y ahora enciende este interruptor.
 
-**La probabilidad pasa a un control en vivo**,
-`number.balance_hidrico_probabilidad_de_lluvia` (10–100 %, de 5 en 5), en el
-dispositivo y en el panel, y sale del formulario de Configurar. Tenerla en los
-dos sitios habría creado un ajuste fantasma: el valor guardado por el control
-manda, y el de Configurar dejaría de contar sin avisar. Es lo que ya pasa con
-los `number` de zona: en cuanto se toca uno, el mismo campo de Configurar →
-Zonas deja de aplicarse.
+La probabilidad pasó además a ser un control en vivo
+(`number.balance_hidrico_probabilidad_de_lluvia`) y salió de Configurar. Duró
+poco: se deshizo el mismo día, antes de publicarse, con la decisión de §7.25.
 
-Qué más se valoró poner en el panel, y por qué no:
+### 7.25 Cada ajuste se cambia en un solo sitio: «Configurar» (v0.5.0)
 
-- **Horas de lluvia probable:** AEMET da la probabilidad en tramos de 6 h, así
-  que cualquier valor de 1 a 6 hace lo mismo. Se queda en Configurar.
-- **Umbral de milímetros previstos:** con AEMET casi nunca es lo que decide.
-- **Lluvia mínima y tope, helada, déficit máximo, márgenes y horarios:** se
-  fijan una vez; en el panel solo servirían para cambiarlos sin querer.
-- **Kc mensual:** cambia una vez al año, tras la revisión de primavera; para
-  ajustes rápidos ya está el coeficiente de cada zona.
+Al poner la probabilidad como control (§7.24) salió a la luz un defecto de
+diseño que venía de la primera versión. La superficie, el umbral, el techo y
+el coeficiente de cada zona se podían cambiar en dos sitios: en Configurar →
+Zonas y con su `number` en el panel. El `number` guardaba su valor en el
+almacén, y `valor_zona()` lo prefería siempre; así que, en cuanto se tocaba
+uno, el mismo campo de Configurar dejaba de aplicarse sin ningún aviso. Con
+el modo simulación pasaba igual entre su interruptor y la casilla del paso
+«Planificación del ciclo».
+
+Maxi decidió que los ajustes se cambien **solo en Configurar** y que el panel
+solo los muestre. Queda así:
+
+- **Ajustes, solo en Configurar.** Por zona: superficie, umbral, techo,
+  coeficiente y Kc. Del sistema: todo lo de previsión, incluida la
+  probabilidad (vuelve al paso «Previsión de lluvia y protecciones»).
+  Guardar recarga la integración en un par de segundos, sin perder nada: el
+  déficit y los acumulados están en el almacén.
+- **Interruptores, solo con su switch.** Simulación, zona habilitada y saltar
+  el próximo riego son estados de uso diario, no ajustes, y su valor vive en
+  el almacén. La simulación sigue en el alta, para empezar con ella puesta,
+  pero sale de las opciones.
+- **Se retiran los `number`.** Los 12 de zona y el de probabilidad. La
+  integración borra del registro, al arrancar, cualquier entidad `number`
+  suya: si no, quedarían para siempre como «ya no las proporciona la
+  integración».
+- **El panel muestra los ajustes como atributos** del sensor de déficit de
+  cada zona: `superficie_m2` y `techo_l` (nuevos), junto a `umbral_mm` y
+  `factor_zona`. La cabecera y «Previsto» proyectan con ellos, y el Detalle
+  los enseña en una tarjeta de solo lectura.
+
+**Migración.** Si algún ajuste se había tocado con su `number`, al arrancar
+se copia a la configuración antes de borrarlo del almacén. Sin eso, quitar los
+controles podía cambiar en silencio la dosis de una zona. En esta
+instalación no había ninguno: el 07/10 el almacén no guardaba ningún ajuste
+de zona, y los doce `number` valían lo mismo que Configurar (140/80/45 m²,
+umbral 0,5 mm, techos 800/450/350 L, coeficiente 1,0).
+
+**El panel de Maxi no es el automático.** `riego-balance` es una copia fija,
+retocada a mano (baterías, válvulas, lluvia diaria del contador), no la
+estrategia. Los cambios de la estrategia no le llegan solos: hay que
+editarlo aparte cuando cambian las entidades. Leía la superficie y el umbral
+de los `number`, así que se actualiza a mano a la vez que se instala v0.5.0.

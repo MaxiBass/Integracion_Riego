@@ -94,10 +94,14 @@ SENSORES_ZONA: tuple[DescripcionSensor, ...] = (
         native_unit_of_measurement="mm",
         state_class=SensorStateClass.MEASUREMENT,
         valor=lambda z: z.get("deficit"),
+        # Los ajustes de la zona viajan aquí para que el panel los muestre y
+        # proyecte el riego: desde v0.5.0 no tienen entidad propia.
         atributos=lambda z: {
             "umbral_mm": z.get("umbral"),
             "kc_mes": z.get("kc"),
             "factor_zona": z.get("factor"),
+            "superficie_m2": z.get("m2"),
+            "techo_l": z.get("techo"),
             "volumen_equivalente_l": round(z.get("deficit", 0) * z.get("m2", 0)),
         },
     ),

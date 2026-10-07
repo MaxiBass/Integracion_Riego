@@ -24,8 +24,10 @@ Historial de decisiones, hallazgos de la revisión y plan de migración:
 - **Protecciones**: helada, lluvia prevista (aplazamiento de un día, por
   milímetros previstos o por horas con probabilidad alta) y válvula en fallo
   — en los tres casos el déficit se conserva.
-- **Mandos en vivo**: saltar el próximo riego con un interruptor, y la
-  probabilidad de lluvia que aplaza el ciclo, sin pasar por Configurar.
+- **Un solo sitio para cada cosa**: los ajustes (superficie, umbral, techo,
+  coeficiente, Kc, previsión) se cambian en **Configurar**, y el panel solo
+  los muestra. Los interruptores de uso diario (simulación, zona habilitada,
+  saltar el próximo riego) se cambian con su switch.
 - **Modo simulación**: calcula y avisa, pero no envía nada a las válvulas.
 - **Estadísticas de temporada** por zona, con `state_class` para el
   histórico a largo plazo.
@@ -68,8 +70,9 @@ recarga con Ctrl+F5: el módulo se sirve en `/riego_static/riego-strategy.js`.
 
 Si prefieres un panel fijo que puedas editar a mano, no uses la estrategia y
 monta las tarjetas tú: una vista de tipo `sections`, una sección por zona con
-tiles de las entidades, los `number` con la característica `numeric-input` y
-los `switch` con `toggle`.
+tiles de las entidades y los `switch` con `toggle`. Los ajustes de cada zona
+están en los atributos del sensor de déficit (`superficie_m2`, `umbral_mm`,
+`techo_l`, `factor_zona`, `kc_mes`).
 
 ## Servicios
 
