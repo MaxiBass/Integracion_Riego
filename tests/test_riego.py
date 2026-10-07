@@ -172,10 +172,10 @@ def test_config_flow() -> None:
                                                   custom_serializer=cv.custom_serializer)}
     esperados = {"sensor_temperatura", "sensor_humedad", "sensor_radiacion",
                  "sensor_iluminancia", "factor_lux", "sensor_viento", "sensor_presion",
-                 "sensor_lluvia_24h", "altura_anemometro", "viento_minimo",
-                 "factor_radiacion"}
+                 "sensor_lluvia_24h", "sensor_lluvia_total", "altura_anemometro",
+                 "viento_minimo", "factor_radiacion"}
     comprobar(set(campos) == esperados,
-              f"el paso de meteorología tiene los 11 campos esperados (faltan: "
+              f"el paso de meteorología tiene los 12 campos esperados (faltan: "
               f"{esperados - set(campos)}, sobran: {set(campos) - esperados})")
 
     for nombre, defecto in (("factor_lux", DEFECTO_FACTOR_LUX),
@@ -186,6 +186,25 @@ def test_config_flow() -> None:
         comprobar(bool(dentro),
                   f"{nombre}: el valor por defecto {defecto} cabe en "
                   f"[{num.get('min')}, {num.get('max')}]")
+
+    # Aplazamiento por probabilidad: los dos campos existen, su valor por
+    # defecto cabe en el selector y las horas admiten 0, que lo desactiva.
+    from custom_components.riego.config_flow import esquema_prevision
+    from custom_components.riego.const import (
+        DEFECTO_HORAS_PROBABLES, DEFECTO_PROBABILIDAD_PREVISTA,
+    )
+
+    prevision = {c["name"]: c for c in to_field_list(esquema_prevision({}),
+                                                     custom_serializer=cv.custom_serializer)}
+    for nombre, defecto in (("lluvia_probabilidad_umbral", DEFECTO_PROBABILIDAD_PREVISTA),
+                            ("lluvia_horas_probables", DEFECTO_HORAS_PROBABLES)):
+        num = prevision.get(nombre, {}).get("selector", {}).get("number", {})
+        dentro = num and num["min"] <= defecto <= num["max"]
+        comprobar(bool(dentro),
+                  f"{nombre}: el valor por defecto {defecto} cabe en "
+                  f"[{num.get('min')}, {num.get('max')}]")
+    horas = prevision.get("lluvia_horas_probables", {}).get("selector", {}).get("number", {})
+    comprobar(horas.get("min") == 0, "las horas de lluvia probable admiten 0, que desactiva el criterio")
 
     # Ningún esquema puede tener un booleano OBLIGATORIO: ha-form considera
     # que un booleano required con valor false está «sin rellenar» y bloquea
@@ -312,6 +331,26 @@ def test_traducciones() -> None:
         comprobar(not faltan, f"{nombre}: todos los pasos del alta tienen texto (faltan {faltan})")
         faltan = pasos_opciones - set(d.get("options", {}).get("step", {}))
         comprobar(not faltan, f"{nombre}: todos los pasos de opciones tienen texto (faltan {faltan})")
+
+    # Cada campo de cada formulario tiene su etiqueta. Sin ella, HA pinta el
+    # nombre interno (lluvia_horas_probables) en lugar del texto.
+    from homeassistant.helpers import config_validation as cv
+    from probatio import to_field_list
+
+    formularios = {
+        ("config", "user"): cf.esquema_meteo, ("config", "prevision"): cf.esquema_prevision,
+        ("config", "ciclo"): cf.esquema_ciclo, ("config", "zona"): cf.esquema_zona,
+        ("options", "meteo"): cf.esquema_meteo, ("options", "prevision"): cf.esquema_prevision,
+        ("options", "ciclo"): cf.esquema_ciclo, ("options", "editar_zona"): cf.esquema_zona,
+    }
+    for nombre, d in cargados.items():
+        sin_texto = []
+        for (seccion, paso), esquema in formularios.items():
+            etiquetas = d[seccion]["step"].get(paso, {}).get("data", {})
+            for campo in to_field_list(esquema({}), custom_serializer=cv.custom_serializer):
+                if campo["name"] not in etiquetas:
+                    sin_texto.append(f"{seccion}.{paso}.{campo['name']}")
+        comprobar(not sin_texto, f"{nombre}: todos los campos tienen etiqueta (faltan {sin_texto})")
 
     for nombre, d in cargados.items():
         otra = d["config"]["step"]["otra"]
@@ -445,7 +484,8 @@ def _coordinador() -> None:
         c.async_refresh = AsyncMock()
         c._estado = {"et0_acumulada": 0.0, "et0_periodo_anterior": 0.0, "et0_previa": 0.0,
                      "ultima_integracion": None, "aplazado_lluvia": False,
-                     "ultimo_ciclo": None, "zonas": {}, "simulacion": simulacion}
+                     "lluvia_acumulada": 0.0, "ultimo_ciclo": None, "zonas": {},
+                     "simulacion": simulacion}
         for z in ZONAS:
             c.runtime(z["id"]).update({"deficit": 0.0, "litros_hoy": 0.0, "litros_temporada": 0.0})
 
@@ -571,6 +611,137 @@ def _coordinador() -> None:
     comprobar(c._lluvia_efectiva() == 0.0, "1 mm < mínimo de 2 mm → lluvia efectiva 0")
     hass.states.set("sensor.lluvia", 50.0)
     comprobar(c._lluvia_efectiva() == 20.0, "50 mm se capan a 20 mm")
+
+    # 6b. Contador de lluvia total: se mide lo que sube entre un ciclo y el
+    # siguiente. Las lecturas son las reales del 06/10/2026: el sensor de 24 h
+    # dio 5,59 mm en el ciclo del 07/10, pero entre ciclos cayeron 8,41.
+    c, hass = construir(sensor_lluvia_total="sensor.lluvia_total")
+    c._estado["ultimo_ciclo"] = datetime(2026, 10, 6, 4, 56, tzinfo=timezone.utc).isoformat()
+    hass.states.set("sensor.lluvia_total", 266.09)
+    c._integrar_lluvia()
+    comprobar(c._estado["lluvia_total_previa"] == 266.09 and c._estado["lluvia_acumulada"] == 0.0,
+              "la primera lectura del contador solo fija la referencia")
+    for valor in (267.11, "unavailable", 270.21, "unknown", 274.5):
+        hass.states.set("sensor.lluvia_total", valor)
+        c._integrar_lluvia()
+    comprobar(casi(c._estado["lluvia_acumulada"], 8.41, 1e-9),
+              f"suma lo que sube y se salta los unavailable: {c._estado['lluvia_acumulada']:.2f} mm (esperado 8.41)")
+
+    # Se configuró después del último ciclo: lo acumulado no cubre el periodo
+    # entero, así que hasta el próximo ciclo manda el sensor de 24 h.
+    hass.states.set("sensor.lluvia", 5.59)
+    comprobar(c._lluvia_periodo() == (5.59, "24 h"),
+              f"con el periodo a medias se usa aún el sensor de 24 h: {c._lluvia_periodo()}")
+    c._estado["et0_acumulada"] = 1.45
+    publicados.clear()
+    with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
+        resumen = asyncio.run(c.ejecutar_ciclo())
+    comprobar(resumen["fuente_lluvia"] == "24 h" and resumen["lluvia_efectiva"] == 5.59,
+              "ese primer ciclo descuenta la lluvia del sensor de 24 h")
+    comprobar(c._estado["lluvia_acumulada"] == 0.0, "el ciclo pone a cero la lluvia acumulada")
+    # El sensor de 24 h seguirá marcando 5,59 mm durante horas, pero esa
+    # lluvia ya se descontó: el panel la restaba otra vez en la proyección.
+    comprobar(c._lluvia_periodo() == (0.0, "contador") and c._lluvia_efectiva() == 0.0,
+              "tras el ciclo manda el contador y la lluvia ya descontada no cuenta dos veces")
+
+    hass.states.set("sensor.lluvia_total", 280.0)
+    c._integrar_lluvia()
+    hass.states.set("sensor.lluvia_total", 281.0)  # sin minuto de por medio
+    c._estado["et0_acumulada"] = 3.10
+    publicados.clear()
+    with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
+        resumen = asyncio.run(c.ejecutar_ciclo())
+    comprobar(resumen["fuente_lluvia"] == "contador" and casi(resumen["lluvia_efectiva"], 6.5),
+              f"el ciclo usa el contador hasta el último minuto: {resumen['lluvia_efectiva']} mm (esperado 6.5)")
+    comprobar(not publicados, "6.5 mm cubren los 3.10 × 0.71 = 2.2 mm del periodo: no se riega")
+
+    # Puesta a cero del contador y ruido de lectura
+    c, hass = construir(sensor_lluvia_total="sensor.lluvia_total")
+    for valor in (300.0, 301.0, 0.4, 0.38, 0.4, 1.0):
+        hass.states.set("sensor.lluvia_total", valor)
+        c._integrar_lluvia()
+    # +1 · puesta a cero: +0.4 · 0.38 es ruido · vuelve a 0.4: +0 · +0.6
+    comprobar(casi(c._estado["lluvia_acumulada"], 2.0, 1e-9),
+              f"si el contador se pone a cero cuenta lo nuevo, y una bajada pequeña no "
+              f"cuenta dos veces: {c._estado['lluvia_acumulada']:.2f} mm (esperado 2.0)")
+    c.entry.data["sensor_lluvia_total"] = "sensor.otro"
+    hass.states.set("sensor.otro", 50.0)
+    c._integrar_lluvia()
+    comprobar(c._estado["lluvia_total_previa"] == 50.0 and c._estado["lluvia_acumulada"] == 0.0,
+              "al cambiar de contador se toma referencia nueva en vez de restar dos contadores")
+
+    # La lluvia se integra cada minuto aunque la ET₀ no se pueda calcular
+    c, hass = construir(sensor_lluvia_total="sensor.lluvia_total")
+    hass.states.set("sensor.temp", "unavailable")
+    for valor in (10.0, 12.5):
+        hass.states.set("sensor.lluvia_total", valor)
+        asyncio.run(c._tick(None))
+    comprobar(casi(c._estado["lluvia_acumulada"], 2.5, 1e-9),
+              "la lluvia se integra aunque falte la temperatura para la ET₀")
+
+    # 6c. Aplazamiento por lluvia prevista: por cantidad o por probabilidad
+    def horaria(prob, mm=0.1, desde=6, horas=6):
+        return {"weather.aemet": {"forecast": [
+            {"precipitation": mm if desde <= i < desde + horas else 0.0,
+             "precipitation_probability": prob if desde <= i < desde + horas else 0}
+            for i in range(48)
+        ]}}
+
+    def con_prevision(respuesta, **extra):
+        c, hass = construir(weather_entity="weather.aemet", **extra)
+        hass.services.async_call = AsyncMock(
+            side_effect=lambda *a, **k: respuesta if a[:2] == ("weather", "get_forecasts") else None
+        )
+        c._estado["et0_acumulada"] = 3.10
+        return c, hass
+
+    def ciclo(c):
+        publicados.clear()
+        with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
+            return asyncio.run(c.ejecutar_ciclo())
+
+    def ultimo_aviso(hass) -> str:
+        avisos = [ll.args[2]["message"] for ll in hass.services.async_call.call_args_list
+                  if ll.args[:2] == ("notify", "send_message")]
+        return avisos[-1] if avisos else ""
+
+    # La previsión de AEMET para el 08/10: 6 h al 75 %, a 0,1 mm/h
+    c, hass = con_prevision(horaria(75))
+    r = ciclo(c)
+    comprobar(r["resultado"] == "aplazado_lluvia",
+              f"6 h al 75 % aplazan aunque solo se prevean {r.get('lluvia_prevista')} mm")
+    comprobar(not publicados and c.deficit("frutales") > 2.0,
+              "al aplazar no se abre ninguna válvula y el déficit se conserva")
+    comprobar(r.get("horas_lluvia_probable") == 6 and r.get("probabilidad_lluvia_max") == 75,
+              "el resumen del ciclo recoge las horas probables y la probabilidad máxima")
+    aviso = ultimo_aviso(hass)
+    comprobar("probabilidad" in aviso and "75 %" in aviso, f"el aviso dice por qué se aplaza: {aviso!r}")
+    r = ciclo(c)
+    comprobar(r["resultado"] == "completado" and bool(publicados),
+              "al día siguiente riega aunque siga la previsión: se aplaza un día como máximo")
+
+    for etiqueta, respuesta, extra in (
+        ("probabilidad del 60 %, por debajo del umbral", horaria(60), {}),
+        ("solo 2 h al 75 %", horaria(75, horas=2), {}),
+        ("criterio desactivado con 0 horas", horaria(75), {"lluvia_horas_probables": 0}),
+        ("lluvia probable fuera del horizonte de 24 h", horaria(75, desde=24), {}),
+        ("previsión sin probabilidad", horaria(None), {}),
+    ):
+        c, hass = con_prevision(respuesta, **extra)
+        r = ciclo(c)
+        comprobar(r["resultado"] == "completado", f"no aplaza: {etiqueta}")
+
+    c, hass = con_prevision(horaria(40, mm=1.0))
+    r = ciclo(c)
+    comprobar(r["resultado"] == "aplazado_lluvia" and "6.0 mm previstos" in ultimo_aviso(hass),
+              "la cantidad sigue aplazando por sí sola: 6 mm previstos al 40 %")
+
+    diaria = {"weather.aemet": {"forecast": [{"precipitation_probability": 80},
+                                             {"precipitation_probability": 0}]}}
+    c, hass = con_prevision(diaria, forecast_tipo="daily")
+    r = ciclo(c)
+    comprobar(r["resultado"] == "aplazado_lluvia" and r.get("horas_lluvia_probable") == 24,
+              "con previsión diaria, un día al 80 % cuenta como 24 h probables")
 
     # 7. Hora de inicio: terminar al amanecer
     c, hass = construir()

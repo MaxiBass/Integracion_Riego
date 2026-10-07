@@ -26,6 +26,7 @@ from .const import (
     CONF_FORECAST_TIPO,
     CONF_HORA_FIJA,
     CONF_HORA_MINIMA,
+    CONF_HORAS_PROBABLES,
     CONF_LLUVIA_CAP,
     CONF_LLUVIA_MINIMA,
     CONF_LLUVIA_PREVISTA,
@@ -33,9 +34,11 @@ from .const import (
     CONF_MODO_INICIO,
     CONF_NOTIFY,
     CONF_OFFSET_AMANECER,
+    CONF_PROBABILIDAD_PREVISTA,
     CONF_SENSOR_HUMEDAD,
     CONF_SENSOR_ILUMINANCIA,
     CONF_SENSOR_LLUVIA,
+    CONF_SENSOR_LLUVIA_TOTAL,
     CONF_SENSOR_PRESION,
     CONF_SENSOR_RADIACION,
     CONF_SENSOR_TEMP,
@@ -55,6 +58,7 @@ from .const import (
     DEFECTO_FORECAST_HORAS,
     DEFECTO_HORA_FIJA,
     DEFECTO_HORA_MINIMA,
+    DEFECTO_HORAS_PROBABLES,
     DEFECTO_KC,
     DEFECTO_LLUVIA_CAP,
     DEFECTO_LLUVIA_MINIMA,
@@ -62,6 +66,7 @@ from .const import (
     DEFECTO_M2,
     DEFECTO_MARGEN_DURACION,
     DEFECTO_OFFSET_AMANECER,
+    DEFECTO_PROBABILIDAD_PREVISTA,
     DEFECTO_TECHO,
     DEFECTO_TEMP_HELADA,
     DEFECTO_UMBRAL,
@@ -136,6 +141,10 @@ def esquema_meteo(valores: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_SENSOR_LLUVIA, description={"suggested_value": valores.get(CONF_SENSOR_LLUVIA)}
             ): _sensor(),
+            vol.Optional(
+                CONF_SENSOR_LLUVIA_TOTAL,
+                description={"suggested_value": valores.get(CONF_SENSOR_LLUVIA_TOTAL)},
+            ): _sensor(),
             vol.Required(
                 CONF_ALTURA_ANEMOMETRO,
                 default=valores.get(CONF_ALTURA_ANEMOMETRO, DEFECTO_ALTURA_ANEMOMETRO),
@@ -174,6 +183,14 @@ def esquema_prevision(valores: dict[str, Any]) -> vol.Schema:
                 CONF_LLUVIA_PREVISTA,
                 default=valores.get(CONF_LLUVIA_PREVISTA, DEFECTO_LLUVIA_PREVISTA),
             ): _numero(0.5, 50, 0.5, "mm"),
+            vol.Required(
+                CONF_PROBABILIDAD_PREVISTA,
+                default=valores.get(CONF_PROBABILIDAD_PREVISTA, DEFECTO_PROBABILIDAD_PREVISTA),
+            ): _numero(10, 100, 5, "%"),
+            vol.Required(
+                CONF_HORAS_PROBABLES,
+                default=valores.get(CONF_HORAS_PROBABLES, DEFECTO_HORAS_PROBABLES),
+            ): _numero(0, 120, 1, "h"),
             vol.Required(
                 CONF_LLUVIA_MINIMA, default=valores.get(CONF_LLUVIA_MINIMA, DEFECTO_LLUVIA_MINIMA)
             ): _numero(0, 20, 0.1, "mm"),

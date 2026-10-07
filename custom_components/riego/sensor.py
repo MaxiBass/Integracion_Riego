@@ -62,6 +62,10 @@ SENSORES_SISTEMA: tuple[DescripcionSensor, ...] = (
         native_unit_of_measurement="mm",
         state_class=SensorStateClass.MEASUREMENT,
         valor=lambda d: d.get("lluvia_efectiva"),
+        atributos=lambda d: {
+            "lluvia_medida_mm": d.get("lluvia_medida"),
+            "fuente": d.get("lluvia_fuente"),
+        },
     ),
     DescripcionSensor(
         key="proximo_ciclo",

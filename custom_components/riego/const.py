@@ -25,6 +25,7 @@ CONF_FACTOR_LUX: Final = "factor_lux"
 CONF_SENSOR_VIENTO: Final = "sensor_viento"
 CONF_SENSOR_PRESION: Final = "sensor_presion"
 CONF_SENSOR_LLUVIA: Final = "sensor_lluvia_24h"
+CONF_SENSOR_LLUVIA_TOTAL: Final = "sensor_lluvia_total"
 CONF_ALTURA_ANEMOMETRO: Final = "altura_anemometro"
 CONF_VIENTO_MINIMO: Final = "viento_minimo"
 CONF_FACTOR_RADIACION: Final = "factor_radiacion"
@@ -40,6 +41,8 @@ FORECAST_DIARIO: Final = "daily"
 CONF_LLUVIA_MINIMA: Final = "lluvia_minima"
 CONF_LLUVIA_CAP: Final = "lluvia_cap"
 CONF_LLUVIA_PREVISTA: Final = "lluvia_prevista_umbral"
+CONF_PROBABILIDAD_PREVISTA: Final = "lluvia_probabilidad_umbral"
+CONF_HORAS_PROBABLES: Final = "lluvia_horas_probables"
 CONF_TEMP_HELADA: Final = "temp_helada"
 CONF_DEFICIT_MAXIMO: Final = "deficit_maximo"
 
@@ -94,6 +97,12 @@ DEFECTO_FACTOR_LUX: Final = 126.7
 DEFECTO_LLUVIA_MINIMA: Final = 2.0
 DEFECTO_LLUVIA_CAP: Final = 20.0
 DEFECTO_LLUVIA_PREVISTA: Final = 3.0
+# Aplazamiento por probabilidad: al menos 3 horas con un 70 % o más. AEMET
+# reparte casi siempre la lluvia prevista a 0,1 mm/h, así que la suma de
+# milímetros se queda corta incluso antes de un chaparrón; la probabilidad,
+# en cambio, sí avisa (§7.23 en DECISIONES.md).
+DEFECTO_PROBABILIDAD_PREVISTA: Final = 70
+DEFECTO_HORAS_PROBABLES: Final = 3
 DEFECTO_TEMP_HELADA: Final = 1.0
 DEFECTO_DEFICIT_MAXIMO: Final = 50.0
 DEFECTO_FORECAST_HORAS: Final = 24
