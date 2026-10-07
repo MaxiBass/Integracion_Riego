@@ -1043,8 +1043,9 @@ nunca aplaza; la probabilidad sí avisa.
 
 Regla nueva: se aplaza si la cantidad prevista llega al umbral (3 mm, como
 antes) **o** si en el horizonte hay al menos 3 horas con una probabilidad del
-70 % o más. Las dos cifras se pueden configurar, y con 0 horas el criterio de
-probabilidad queda desactivado. AEMET da la probabilidad por tramos de 6 h
+70 % o más. La probabilidad se ajusta con un control del dispositivo y las
+horas en Configurar (§7.24); con 0 horas el criterio de probabilidad queda
+desactivado. AEMET da la probabilidad por tramos de 6 h
 (00–06, 06–12, 12–18 y 18–24), así que en la práctica basta un tramo al 70 %
 o más. Con previsión diaria, cada día probable cuenta como 24 h.
 
@@ -1108,3 +1109,48 @@ aparece también al día siguiente, hasta el ciclo.
 
 El evento `riego_evento` del ciclo lleva campos nuevos: `lluvia_medida`,
 `fuente_lluvia`, `horas_lluvia_probable` y `probabilidad_lluvia_max`.
+
+### 7.24 «Saltar el próximo riego» no saltaba nada; la probabilidad pasa a control (v0.4.1)
+
+Maxi pidió poder cambiar el 70 % de §7.23 sin entrar en Configurar. Al repasar
+qué otros ajustes merecía la pena tener a mano salió un fallo que venía de la
+primera versión.
+
+**`riego.saltar_dia` no saltaba el riego.** Su descripción decía que el
+próximo ciclo solo acumularía déficit. En realidad encendía `aplazado_lluvia`,
+la marca que impide aplazar por lluvia dos días seguidos, y el ciclo la lee
+como «ayer ya se aplazó: hoy se riega pase lo que pase». Así que el ciclo
+siguiente regaba normal: en una prueba con 3 mm de ET₀ envió 294 L. De paso
+anulaba un posible aplazamiento por lluvia de ese día y dejaba el panel en
+«Ciclo aplazado por lluvia prevista». Ninguna prueba cubría el servicio.
+
+Ahora hay un interruptor **«Saltar el próximo riego»**
+(`switch.balance_hidrico_saltar_el_proximo_riego`), en el dispositivo Balance
+Hídrico y bajo la cabecera del Resumen, con una marca propia:
+
+- Es un interruptor y no un botón para que se vea si hay un salto pendiente y
+  se pueda deshacer. Se apaga solo después del ciclo saltado.
+- El ciclo saltado suma la ET₀ y la lluvia del periodo como cualquier otro; el
+  déficit se conserva, se avisa por Telegram y el ciclo siguiente riega.
+- Solo afecta al ciclo programado. Un `riego.ejecutar_ciclo` lanzado a mano es
+  una orden explícita de regar: riega y deja el salto pendiente.
+- No toca `aplazado_lluvia`: saltar no cuenta como aplazamiento por lluvia.
+- `riego.saltar_dia` sigue existiendo y ahora enciende este interruptor.
+
+**La probabilidad pasa a un control en vivo**,
+`number.balance_hidrico_probabilidad_de_lluvia` (10–100 %, de 5 en 5), en el
+dispositivo y en el panel, y sale del formulario de Configurar. Tenerla en los
+dos sitios habría creado un ajuste fantasma: el valor guardado por el control
+manda, y el de Configurar dejaría de contar sin avisar. Es lo que ya pasa con
+los `number` de zona: en cuanto se toca uno, el mismo campo de Configurar →
+Zonas deja de aplicarse.
+
+Qué más se valoró poner en el panel, y por qué no:
+
+- **Horas de lluvia probable:** AEMET da la probabilidad en tramos de 6 h, así
+  que cualquier valor de 1 a 6 hace lo mismo. Se queda en Configurar.
+- **Umbral de milímetros previstos:** con AEMET casi nunca es lo que decide.
+- **Lluvia mínima y tope, helada, déficit máximo, márgenes y horarios:** se
+  fijan una vez; en el panel solo servirían para cambiarlos sin querer.
+- **Kc mensual:** cambia una vez al año, tras la revisión de primavera; para
+  ajustes rápidos ya está el coeficiente de cada zona.

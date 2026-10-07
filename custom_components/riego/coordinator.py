@@ -123,6 +123,7 @@ ETIQUETAS = {
     "simulado": "simulado",
     "helada": "helada",
     "aplazado_lluvia": "aplazado por lluvia",
+    "saltado": "saltado a petición",
     "completado": "completado",
     "ya_en_curso": "ya en curso",
 }
@@ -243,6 +244,28 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def habilitada(self, zid: str) -> bool:
         return bool(self.valor_zona(zid, "habilitada", True))
 
+    @property
+    def probabilidad_lluvia(self) -> float:
+        """Probabilidad desde la que una hora de la previsión es lluvia probable.
+
+        Solo se ajusta con su control en el dispositivo, no en «Configurar»:
+        con los dos sitios, el control taparía para siempre lo configurado,
+        como pasa con los number de zona.
+        """
+        valor = self._estado.get(CONF_PROBABILIDAD_PREVISTA)
+        return float(DEFECTO_PROBABILIDAD_PREVISTA if valor is None else valor)
+
+    async def set_probabilidad_lluvia(self, valor: float) -> None:
+        self._estado[CONF_PROBABILIDAD_PREVISTA] = valor
+        await self._guardar()
+        await self.async_refresh()
+
+    async def set_saltar_proximo(self, valor: bool) -> None:
+        """Marca o desmarca el próximo ciclo programado para que no riegue."""
+        self._estado["saltar_proximo"] = valor
+        await self._guardar()
+        await self.async_refresh()
+
     # ── Arranque y parada ─────────────────────────────────────────────
 
     async def async_iniciar(self) -> None:
@@ -257,6 +280,8 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lluvia_total_entidad": guardado.get("lluvia_total_entidad"),
             "lluvia_total_desde": guardado.get("lluvia_total_desde"),
             "aplazado_lluvia": guardado.get("aplazado_lluvia", False),
+            "saltar_proximo": guardado.get("saltar_proximo", False),
+            CONF_PROBABILIDAD_PREVISTA: guardado.get(CONF_PROBABILIDAD_PREVISTA),
             "ultimo_ciclo": guardado.get("ultimo_ciclo"),
             "ultimo_ciclo_programado": guardado.get("ultimo_ciclo_programado"),
             "zonas": guardado.get("zonas", {}),
@@ -486,7 +511,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         horario = tipo == FORECAST_HORARIO
         tramos = horas if horario else max(1, round(horas / 24))
-        umbral = float(self._opt(CONF_PROBABILIDAD_PREVISTA, DEFECTO_PROBABILIDAD_PREVISTA))
+        umbral = self.probabilidad_lluvia
         total, probables, maxima = 0.0, 0, 0.0
         for tramo in prevision[:tramos]:
             if (mm := _flotante(tramo.get("precipitation"))) is not None:
@@ -757,7 +782,22 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         resumen["lluvia_medida"] = round(lluvia_bruta, 2)
         resumen["fuente_lluvia"] = fuente_lluvia
 
-        # 2. Protección por helada — el déficit se conserva
+        # 2. Riego saltado a petición — el déficit se conserva. Solo cuenta el
+        # ciclo programado: uno lanzado a mano es una orden explícita de regar
+        # y deja el salto pendiente para el programado.
+        if programado and self._estado.get("saltar_proximo"):
+            self._estado["saltar_proximo"] = False
+            await self._guardar()
+            await self._avisar(
+                "⏭️ Riego saltado a petición. "
+                "Los déficits se conservan para el próximo ciclo."
+            )
+            resumen["resultado"] = "saltado"
+            self._emitir("ciclo_omitido", resumen)
+            await self.async_refresh()
+            return resumen
+
+        # 3. Protección por helada — el déficit se conserva
         temp = _num(self.hass.states.get(op[CONF_SENSOR_TEMP]), 99.0)
         umbral_helada = float(self._opt(CONF_TEMP_HELADA, DEFECTO_TEMP_HELADA))
         if temp < umbral_helada:
@@ -770,7 +810,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_refresh()
             return resumen
 
-        # 3. Aplazamiento por lluvia prevista, como máximo un día. Aplaza
+        # 4. Aplazamiento por lluvia prevista, como máximo un día. Aplaza
         # tanto la cantidad prevista como la probabilidad sostenida: con AEMET
         # la cantidad casi nunca llega al umbral aunque luego llueva.
         prevista = await self._lluvia_prevista()
@@ -778,7 +818,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         resumen["horas_lluvia_probable"] = prevista["horas_probables"]
         resumen["probabilidad_lluvia_max"] = prevista["probabilidad_max"]
         umbral_prevista = float(self._opt(CONF_LLUVIA_PREVISTA, DEFECTO_LLUVIA_PREVISTA))
-        umbral_prob = float(self._opt(CONF_PROBABILIDAD_PREVISTA, DEFECTO_PROBABILIDAD_PREVISTA))
+        umbral_prob = self.probabilidad_lluvia
         horas_min = int(self._opt(CONF_HORAS_PROBABLES, DEFECTO_HORAS_PROBABLES))
         por_cantidad = prevista["mm"] >= umbral_prevista
         por_probabilidad = 0 < horas_min <= prevista["horas_probables"]
@@ -805,7 +845,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._estado["aplazado_lluvia"] = False
         await self._guardar()
 
-        # 4. Riego zona a zona, con desfase fijo entre ellas
+        # 5. Riego zona a zona, con desfase fijo entre ellas
         desfase = int(self._opt(CONF_DESFASE_ZONAS, DEFECTO_DESFASE_ZONAS))
         primera = True
         for z in self.zonas:
@@ -932,11 +972,6 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._guardar()
         await self.async_refresh()
 
-    async def saltar_dia(self) -> None:
-        self._estado["aplazado_lluvia"] = True
-        await self._guardar()
-        await self.async_refresh()
-
     # ── Avisos ────────────────────────────────────────────────────────
 
     def _emitir(self, tipo: str, datos: dict[str, Any]) -> None:
@@ -1027,6 +1062,8 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lluvia_medida": round(lluvia_medida, 2),
             "lluvia_fuente": lluvia_fuente,
             "aplazado_lluvia": bool(self._estado.get("aplazado_lluvia")),
+            "saltar_proximo": bool(self._estado.get("saltar_proximo")),
+            "probabilidad_lluvia": self.probabilidad_lluvia,
             "simulacion": self.simulacion,
             "proximo_ciclo": self._proximo,
             "ultimo_ciclo": self._estado.get("ultimo_ciclo"),

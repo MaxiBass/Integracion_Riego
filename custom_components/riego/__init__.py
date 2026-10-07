@@ -159,7 +159,7 @@ def _registrar_servicios(hass: HomeAssistant) -> None:
         await coordinador.ajustar_deficit(zid, call.data["valor"], call.data["relativo"])
 
     async def saltar(_call: ServiceCall) -> None:
-        await _coordinador(hass).saltar_dia()
+        await _coordinador(hass).set_saltar_proximo(True)
 
     async def temporada(_call: ServiceCall) -> None:
         await _coordinador(hass).reiniciar_temporada()
