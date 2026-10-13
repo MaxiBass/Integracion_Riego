@@ -1211,6 +1211,15 @@ distinto, y el árbol final idéntico al de `35ad78b`. El único mensaje tocado 
 el de aquel commit, que citaba el hash de la v0.1.1 (ahora `ab289ce`); este
 commit lo sustituye. Se publicó con un push forzado.
 
+Cómo se hizo, por si hay que repetirlo: la reescritura se preparó en una
+copia aparte (Claude Code no puede reescribir el repo de trabajo); Maxi la
+trajo con `git fetch` + `git reset --hard`, y forzó el push desde GitHub
+Desktop (Repository → Force Push). El git de la terminal no tiene
+credenciales de GitHub: pide usuario. **No pulsar «Pull origin»** en ese
+momento: mezclaría el historial viejo con el limpio. Después se limpió el
+repo local (`git reflog expire --expire=now --all` y `git gc --prune=now`) y
+se comprobó que no queda ningún objeto con las coordenadas.
+
 Consecuencias:
 
 - **Todos los hashes desde la v0.1.1 cambiaron.** Equivalencias:
@@ -1247,7 +1256,11 @@ Consecuencias:
   instalan). Se puede actualizar sin reiniciar.
 - **GitHub sigue enseñando los commits viejos** a quien tenga su hash (y el
   registro de actividad del repo enlaza el push forzado) hasta que su soporte
-  los purgue: hay que pedírselo aparte. Y no se puede retirar lo que alguien ya
+  los purgue. Justo después del push la API y raw.githubusercontent seguían
+  sirviendo el commit viejo de la v0.1.1 con las coordenadas. Ticket abierto
+  el 13/10/2026 (Repositorios → Funciones del repositorio, con el primer
+  commit cambiado y el antiguo extremo de la rama); pendiente de respuesta.
+  **No usar la opción «Eliminaciones»** del formulario: borra el repo entero. Y no se puede retirar lo que alguien ya
   hubiera copiado (el 13/10 el repo no tenía forks ni estrellas).
 
 **Regla**: en este repositorio no entran datos reales que identifiquen la
