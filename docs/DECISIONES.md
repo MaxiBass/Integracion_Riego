@@ -1185,3 +1185,72 @@ retocada a mano (baterías, válvulas, lluvia diaria del contador), no la
 estrategia. Los cambios de la estrategia no le llegan solos: hay que
 editarlo aparte cuando cambian las entidades. Leía la superficie y el umbral
 de los `number`, así que se actualiza a mano a la vez que se instala v0.5.0.
+
+### 7.26 Datos personales: las coordenadas de la casa estaban en las pruebas (13/10/2026)
+
+Una revisión de seguridad de todos los repositorios encontró en
+`tests/test_riego.py` las coordenadas exactas de Home Assistant (las de la
+casa, con unos 10 m de precisión; no se repiten aquí), publicadas desde la
+v0.1.1 (13/09/2026). Este repositorio es público porque HACS no lee privados,
+así que cualquiera podía ver dónde está la casa, y cruzarlo con lo que
+cuentan los repos del videoportero y de las matrículas.
+
+**Arreglo**: las pruebas usan el centro de Alicante, aproximado (`38.35,
+-0.48`). La ET₀ solo depende de la posición por la geometría solar, y unos
+pocos kilómetros no la mueven: con HA 2026.10.1 pasan las 140 comprobaciones,
+igual que antes, y solo cambia el cuarto decimal de tres valores
+(0,2090 → 0,2089 mm/h; 0,2165 → 0,2166 mm/h). La integración no cambia (lee
+la ubicación de `hass.config`), así que no se sube la versión.
+
+**Historial reescrito el mismo día**, a petición de Maxi: primero se cambió
+solo la última versión (commit `35ad78b`, ya publicado), y luego se reescribió
+el historial con `git filter-branch` para que ningún commit las contenga. En
+cada uno de los 24 commits que tenían el fichero cambió solo esa línea.
+Comprobado commit a commit: mismos autores, fechas y mensajes, nada más
+distinto, y el árbol final idéntico al de `35ad78b`. El único mensaje tocado es
+el de aquel commit, que citaba el hash de la v0.1.1 (ahora `ab289ce`); este
+commit lo sustituye. Se publicó con un push forzado.
+
+Consecuencias:
+
+- **Todos los hashes desde la v0.1.1 cambiaron.** Equivalencias:
+
+  ```
+  d847329 → ab289ce  v0.1.1: arreglar el 400 al abrir el flujo de configuración
+  069331c → 0af444b  v0.2.0: presión opcional y entrada de irradiancia por lux
+  62adddb → 62effb8  v0.2.1: reparar el campo de factor de lux y el del piranómet
+  1a4cf5e → 2c77897  Documentar la corrección del bug de viento en el paquete de 
+  1e59ac3 → f907def  v0.2.2: el paso final del alta es un menú, no una casilla
+  68cf63e → a9331a4  v0.2.3: ningún booleano obligatorio en los formularios
+  fc810cc → 1829c41  v0.2.4: un ciclo manual ya no cancela el programado
+  2d20032 → 0543106  v0.3.0: arreglar la estrategia de panel
+  6e9831a → 14b587d  v0.3.1: los avisos de Telegram no llegaban, y arreglos del p
+  8951d30 → 7f2828d  v0.3.2: migrar via_device a via_device_id
+  0ec8fc4 → ea770ac  Corregir la caracterización del bug de ET₀ y validar los tec
+  c3067b6 → 7adaa75  v0.3.3: rangos usables en los ajustes por zona
+  7a00177 → 7eb9f15  v0.3.4: el panel, en dos vistas complementarias
+  0db1eb2 → 02fd0d0  v0.3.5: sección «Último riego» en el Resumen
+  e62aaa5 → 03b9462  Recalibrar los vigilantes de Telegram a los techos nuevos
+  70b9bd1 → 9fd8542  v0.3.6: "Previsto para el próximo ciclo" pasa a ser una proy
+  04cb7e9 → 623ad98  v0.3.7: la cabecera del Resumen también pasa a ser una proye
+  edd161f → aa0a990  Tests: fijar el reloj del coordinador; fallaban desde el 1 d
+  f442339 → ff71d4d  v0.3.8: icono de la integración (una gota con un brote)
+  44ec86b → fc8cbde  Docs: CLAUDE.md al día tras el corte y el borrado del sistem
+  00c5126 → e47cfcc  Docs: el interruptor de la válvula puede mentir (falsa alarm
+  d5c1591 → a207258  v0.4.0: lluvia medida entre ciclos y aplazamiento por probab
+  b261015 → 351c476  v0.4.1: «Saltar el próximo riego» y probabilidad de lluvia e
+  412f3ab → d169dd3  v0.5.0: cada ajuste se cambia en un solo sitio, «Configurar»
+  ```
+
+- **HACS** sigue el repo por commit: verá el commit nuevo como una
+  actualización, pero los ficheros instalados son idénticos (las pruebas no se
+  instalan). Se puede actualizar sin reiniciar.
+- **GitHub sigue enseñando los commits viejos** a quien tenga su hash (y el
+  registro de actividad del repo enlaza el push forzado) hasta que su soporte
+  los purgue: hay que pedírselo aparte. Y no se puede retirar lo que alguien ya
+  hubiera copiado (el 13/10 el repo no tenía forks ni estrellas).
+
+**Regla**: en este repositorio no entran datos reales que identifiquen la
+casa ni a nadie (coordenadas, IPs públicas, nombres, matrículas, ids de
+dispositivos). Los datos meteorológicos reales del 12/09 que usa la prueba
+de ET₀ sí pueden quedarse: no dicen dónde está nadie.

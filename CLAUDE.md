@@ -20,6 +20,12 @@ da 404 incluso con GitHub autenticado).
 - Un clasificador de seguridad automático puede bloquear `git add` sobre
   archivos cuyo nombre suene a secreto aunque no tengan datos sensibles
   reales. Si pasa, que el usuario haga ese `git add` puntual él mismo.
+- **Repositorio público: nada de datos reales** que identifiquen la casa o a
+  alguien (coordenadas, IPs públicas, nombres, matrículas, ids). Las pruebas
+  usan el centro de Alicante aproximado, no las coordenadas de HA. Llevaban
+  las reales hasta el 13/10/2026, y ese día se reescribió el historial para
+  quitarlas: **los hashes anteriores cambiaron** (equivalencias en
+  `docs/DECISIONES.md` §7.26).
 
 ## Estructura
 

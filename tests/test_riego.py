@@ -19,6 +19,8 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
 CEST = timezone(timedelta(hours=2))
+# Centro de Alicante, aproximado. Este repositorio es público: nunca las
+# coordenadas reales de la casa (ver docs/DECISIONES.md §7.26).
 LAT, LON, ALT = 38.35, -0.48, 120.0
 
 fallos: list[str] = []
