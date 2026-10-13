@@ -21,9 +21,13 @@ Historial de decisiones, hallazgos de la revisión y plan de migración:
   seguridad de la zona.
 - **Hora de inicio calculada hacia atrás desde el amanecer**, estimando la
   duración con el caudal que aprende de cada zona.
-- **Protecciones**: helada, lluvia prevista (aplazamiento de un día, por
-  milímetros previstos o por horas con probabilidad alta) y válvula sin agua
-  — en los tres casos el déficit se conserva.
+- **Protecciones**: helada y lluvia prevista (aplazamiento de un día, por
+  milímetros previstos o por horas con probabilidad alta); en los dos casos el
+  déficit se conserva.
+- **Comprobación de lo regado**: al terminar cada riego compara lo pedido con
+  lo que la válvula dice haber dado y devuelve al déficit lo que no llegó. El
+  estado de la válvula no bloquea el riego: si falta agua, la propia válvula
+  se cierra sola.
 - **Un solo sitio para cada cosa**: los ajustes (superficie, umbral, techo,
   coeficiente, Kc, previsión) se cambian en **Configurar**, y el panel solo
   los muestra. Los interruptores de uso diario (simulación, zona habilitada,

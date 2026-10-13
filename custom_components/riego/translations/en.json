@@ -78,14 +78,15 @@
           "kc": "Monthly Kc (12 comma-separated values)",
           "topic": "Valve MQTT topic",
           "caudal_defecto": "Initial flow estimate",
-          "sensor_estado": "Valve status sensor",
           "sensor_caudal": "Flow sensor",
           "sensor_volumen_real": "Current irrigation volume sensor",
           "sensor_duracion_real": "Current irrigation duration sensor"
         },
         "data_description": {
           "techo": "Absolute per-cycle limit. It must sit ABOVE the legitimate summer peak; if it clips routinely it is rationing, not protecting.",
-          "factor": "Multiplies ETc before converting to litres. For localized irrigation and controlled deficit irrigation. 1.0 = full FAO-56 dose."
+          "factor": "Multiplies ETc before converting to litres. For localized irrigation and controlled deficit irrigation. 1.0 = full FAO-56 dose.",
+          "sensor_caudal": "Tells the integration whether the zone is watering and, with the volume, lets it check what was actually delivered.",
+          "sensor_volumen_real": "Litres the valve counts in each run. With the flow, the integration checks what was actually delivered and returns any shortfall to the deficit; with the duration, it learns the zone's real flow rate."
         }
       },
       "otra": {
@@ -198,7 +199,6 @@
           "kc": "Monthly Kc (12 comma-separated values)",
           "topic": "Valve MQTT topic",
           "caudal_defecto": "Initial flow estimate",
-          "sensor_estado": "Valve status sensor",
           "sensor_caudal": "Flow sensor",
           "sensor_volumen_real": "Current irrigation volume sensor",
           "sensor_duracion_real": "Current irrigation duration sensor",
@@ -206,7 +206,9 @@
         },
         "data_description": {
           "techo": "Absolute per-cycle limit. It must sit ABOVE the legitimate summer peak; if it clips routinely it is rationing, not protecting.",
-          "factor": "Multiplies ETc before converting to litres. For localized irrigation and controlled deficit irrigation. 1.0 = full FAO-56 dose."
+          "factor": "Multiplies ETc before converting to litres. For localized irrigation and controlled deficit irrigation. 1.0 = full FAO-56 dose.",
+          "sensor_caudal": "Tells the integration whether the zone is watering and, with the volume, lets it check what was actually delivered.",
+          "sensor_volumen_real": "Litres the valve counts in each run. With the flow, the integration checks what was actually delivered and returns any shortfall to the deficit; with the duration, it learns the zone's real flow rate."
         }
       }
     },

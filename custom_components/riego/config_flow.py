@@ -85,7 +85,6 @@ from .const import (
     Z_NOMBRE,
     Z_SENSOR_CAUDAL,
     Z_SENSOR_DURACION,
-    Z_SENSOR_ESTADO,
     Z_SENSOR_VOLUMEN,
     Z_TECHO,
     Z_TOPIC,
@@ -275,9 +274,6 @@ def esquema_zona(valores: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 Z_CAUDAL_DEFECTO, default=valores.get(Z_CAUDAL_DEFECTO, DEFECTO_CAUDAL)
             ): _numero(10, 5000, 10, "L/h"),
-            vol.Optional(
-                Z_SENSOR_ESTADO, description={"suggested_value": valores.get(Z_SENSOR_ESTADO)}
-            ): _sensor(),
             vol.Optional(
                 Z_SENSOR_CAUDAL, description={"suggested_value": valores.get(Z_SENSOR_CAUDAL)}
             ): _sensor(),

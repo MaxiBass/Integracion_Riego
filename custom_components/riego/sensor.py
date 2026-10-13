@@ -140,6 +140,11 @@ SENSORES_ZONA: tuple[DescripcionSensor, ...] = (
         native_unit_of_measurement="L",
         state_class=SensorStateClass.MEASUREMENT,
         valor=lambda z: z.get("litros_hoy"),
+        # Resultado de la última comprobación de entrega (§7.28)
+        atributos=lambda z: {
+            "pedidos_l": z.get("entrega", {}).get("pedidos"),
+            "entregados_l": z.get("entrega", {}).get("entregados"),
+        },
     ),
     DescripcionSensor(
         key="litros_temporada",
@@ -163,7 +168,7 @@ SENSORES_ZONA: tuple[DescripcionSensor, ...] = (
         name="Estado",
         icon="mdi:state-machine",
         device_class=SensorDeviceClass.ENUM,
-        options=["deshabilitada", "acumulando", "lista", "regando", "bloqueada"],
+        options=["deshabilitada", "acumulando", "lista", "regando"],
         valor=lambda z: z.get("estado"),
     ),
     DescripcionSensor(

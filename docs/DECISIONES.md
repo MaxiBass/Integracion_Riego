@@ -116,7 +116,8 @@ Cipreses no regó el 11 ni el 12 de septiembre: la válvula reportaba
 `water_leakage` desde el día 9. La protección hizo lo correcto (saltar y
 conservar el déficit), pero solo avisaba una vez por ciclo y no había forma
 de ver «llevas 3 días sin regar esta zona». De ahí
-`binary_sensor.<zona>_bloqueada` y el estado explícito por zona.
+`binary_sensor.<zona>_bloqueada` y el estado explícito por zona. *Superado
+en v0.6.0: el estado de la válvula ya no bloquea el riego (§7.27, §7.28).*
 
 ### 2.6 Solapamiento entre zonas: no es un problema
 
@@ -298,6 +299,11 @@ que publican en el mismo topic. No se borran, pero no hay que tocarlas.
   avisa.
 - La API de estrategias de Lovelace no está congelada; si una actualización
   de HA la rompe, el panel se puede rehacer a mano con tarjetas normales.
+- La comprobación de lo regado (§7.28) se fía del contador de litros de la
+  propia válvula: si contara litros que no pasan, no se notaría. Tampoco se
+  comprueba un riego cuyo paso de agua coincida entero con Home Assistant
+  parado (se da por regado, como antes), ni las dosis manuales de
+  `riego.regar_zona`, que no tocan el déficit.
 - La cobertura de `tests/test_riego.py` es de comportamiento, no exhaustiva:
   cubre ET₀, los dos flujos de configuración y las ramas del ciclo, pero no
   las entidades ni la estrategia de panel.
@@ -1268,7 +1274,7 @@ casa ni a nadie (coordenadas, IPs públicas, nombres, matrículas, ids de
 dispositivos). Los datos meteorológicos reales del 12/09 que usa la prueba
 de ET₀ sí pueden quedarse: no dicen dónde está nadie.
 
-### 7.27 La fuga de la válvula ya no bloquea el riego (v0.5.1)
+### 7.27 La marca de fuga de la válvula, y por qué bloquear por ella no tenía salida
 
 Cipreses no regó del 10/10 al 13/10. El 09/10, a los 33 s de cerrar tras regar
 126 L, su válvula pasó a informar `water_leakage`, y la integración la bloqueó
@@ -1295,17 +1301,11 @@ abría la válvula, la válvula no se volvía a cerrar y la marca no se borraba
 nunca. Además, bloquear no protegía de nada: no cierra la válvula, y si de
 verdad gotea cerrada, regar no lo empeora.
 
-Desde v0.5.1:
-
-- **`water_shortage`** (sin agua en la toma) sigue bloqueando, también
-  combinado con fuga: abrir sin agua no sirve de nada.
-- **`water_leakage`** solo avisa por Telegram y riega igualmente. El riego
-  vuelve a disparar la comprobación al cerrar, así que una falsa alarma se
-  borra sola en el siguiente ciclo. Si la marca sigue después de regar,
-  entonces sí conviene revisar la válvula.
-- Una fuga grande, con agua pasando a caudal normal con la válvula parada, ya
-  la detecta aparte la automatización «Vigilancia de caudal anómalo»
-  (§7.17, §7.22).
+La primera respuesta (v0.5.1, que no llegó a publicarse) fue que la fuga
+solo avisara y se regara igual, y que la falta de agua siguiera bloqueando. Maxi
+señaló que la falta de agua tiene el mismo problema y que la válvula ya se
+protege sola. La solución final está en §7.28: sin bloqueos, y comprobando
+después lo que riega cada válvula.
 
 Ya pasó en septiembre (§2.5): entonces se resolvió con
 `binary_sensor.<zona>_bloqueada`, para que se viera, pero el bloqueo seguía.
@@ -1316,3 +1316,96 @@ manuales: tras la prueba del 13/10 marcaba 142 L (126 + 16). Es la incidencia
 Un programa de riego por volumen sí lo pone a cero (Frutales y Aptenia
 coinciden con su último ciclo), así que a la integración no le afecta. Solo
 movió un poco el caudal aprendido de Cipreses (274 → 278,5 L/h).
+
+### 7.28 Sin bloqueos: la válvula se protege sola y la integración comprueba lo que riega (v0.6.0)
+
+Después de §7.27, Maxi preguntó si la falta de agua (`water_shortage`) no
+tendría el mismo problema que la fuga, con la válvula ya configurada para
+cerrarse sola si no llega agua. Lo tiene:
+
+- **La falta de agua solo se puede detectar con la válvula abierta**: es «no
+  pasa agua estando abierta». Si su marca dura hasta la apertura siguiente,
+  como la de fuga, bloquear el riego por ella lleva al mismo callejón sin
+  salida. No hay datos para confirmarlo: entre el 13/09 y el 13/10 ninguna
+  de las tres válvulas informó nunca de falta de agua.
+- **La válvula ya se protege sola.** Las tres tienen
+  `auto_close_when_water_shortage` encendido (firmware 4100, la 1.0.4, la
+  mínima que lo admite): si no llega agua, se cierran a los 30 min.
+- **Lo único que protegía el bloqueo era el déficit.** La integración manda
+  la dosis y se olvida (§4.2): pone el déficit a cero al enviar. Si no llegaba
+  agua, la necesidad de ese día se perdía.
+
+Decisión de Maxi: quitar los bloqueos y todo lo que sea redundante, y
+comprobar después de cada riego lo que de verdad se regó.
+
+**Qué se ha quitado:**
+
+- El bloqueo del riego por `current_device_status`, con cualquier valor.
+- `binary_sensor.<zona>_bloqueada` y el estado `bloqueada` de
+  `sensor.<zona>_estado`. La integración los borra del registro al arrancar.
+- El aviso de fuga de v0.5.1. La automatización «Notificaciones Riego
+  Telegram 1» ya avisa de cada cambio de estado de la válvula: fuga, falta de
+  agua y vuelta a normal.
+- El campo «Sensor de estado de la válvula» de cada zona, que solo servía
+  para bloquear. En las zonas ya configuradas el valor sigue guardado, pero no
+  se usa.
+
+**La comprobación.** Así informa una válvula de un riego, con datos de
+Frutales del 12/10 (263 L pedidos):
+
+| Hora | Qué publica la válvula |
+|:--|:--|
+| 06:57:12 | El volumen del riego vuelve a 0 (traía 245 L del día anterior) |
+| 06:57:15 | Caudal 1.300 L/h (pico de apertura), luego 200–300 L/h |
+| 06:57–07:52 | El volumen sube litro a litro, cada ~12 s |
+| 07:52:26 | Volumen 263 L, lo pedido |
+| 07:52:27 | Caudal 0 |
+| ~33 s después | Estado de la válvula (normal o fuga, §7.27) |
+
+Con eso:
+
+- Al enviar un riego del ciclo, la integración lo apunta como pendiente de
+  comprobar: litros pedidos, superficie y la fecha del último riego anterior.
+  Solo en las zonas con sensor de caudal y de volumen, y nunca en simulación.
+- Cuando el caudal vuelve a 0 después de haber pasado agua, la comprobación se
+  hace un minuto después. Un caudal `unavailable` no cuenta como final.
+- Si no se ve pasar agua en ningún momento, se comprueba igualmente al cabo de
+  1,5 veces la duración estimada más 45 min, que cubre la media hora tras la
+  que la válvula se cierra sola. Si a esa hora aún pasa agua, se aplaza otros
+  45 min, hasta 4 veces.
+- **Lo regado** es el volumen que da la válvula si se vio pasar agua, y 0 si
+  Home Assistant estuvo en marcha todo el tiempo y no pasó nada. Si se reinició
+  entre medias y no llegó a ver el agua, no se puede saber: se da por regado,
+  como antes, y queda en el registro.
+- Si falta más de un 5 % (mínimo 5 L), que es la misma tolerancia con la que
+  el panel marca ✅, pasa esto:
+  - vuelve al déficit lo que falta, en mm (litros ÷ m²), con el tope de déficit
+    máximo;
+  - «Litros del último ciclo» pasa a lo regado;
+  - si no llegó nada, «Último riego» vuelve a la fecha anterior;
+  - llega un aviso por la entidad de notificación de la integración;
+  - y se dispara `riego_evento` con tipo `entrega_incompleta`.
+- **«Litros de la temporada» no puede bajar**: es `total_increasing`, y HA
+  toma una bajada como un contador puesto a cero, lo que estropea las
+  estadísticas. Por eso, en las zonas que se comprueban, ya no se suman los
+  litros pedidos al enviar, sino los regados al comprobar.
+- Si un ciclo empieza con alguna comprobación pendiente, la hace primero (paso
+  0). Así lo que no llegó entra en el cálculo de ese mismo ciclo.
+- Las comprobaciones pendientes se guardan en el almacén, y tras un reinicio se
+  vuelven a programar.
+- «Litros del último ciclo» lleva dos atributos nuevos: `pedidos_l` y
+  `entregados_l`.
+
+**Quién avisa de qué**, para que nada se repita:
+
+| Situación | Quién avisa |
+|:--|:--|
+| La válvula marca fuga o falta de agua, o vuelve a normal | «Notificaciones Riego Telegram 1» |
+| Un riego no llega entero | La integración (su entidad de notificación) |
+| Pasa agua con la válvula parada, o el caudal se sale de 150–450 L/h | «Vigilancia de caudal anómalo» |
+| Pasa agua demasiado tiempo, o el volumen supera el techo | «Notificaciones Riego Telegram 1» |
+
+Fuera del repositorio se cambió lo que dependía del bloqueo. En el panel
+`riego-balance` se quitaron la línea «⛔ bloqueada» de la cabecera y los
+recuadros «Bloqueada» del Detalle. Y los textos de fuga y falta de agua de
+«Notificaciones Riego Telegram 1» ahora explican qué pasa con el riego.

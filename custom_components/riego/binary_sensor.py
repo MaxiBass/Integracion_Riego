@@ -21,9 +21,6 @@ async def async_setup_entry(
     coordinador: RiegoCoordinator = hass.data[DOMAIN][entry.entry_id]
     entidades: list[BinarySensorEntity] = [AplazadoPorLluvia(coordinador)]
     for zona in coordinador.zonas:
-        entidades.append(
-            ZonaBloqueada(coordinador, zona[Z_ID], zona.get(Z_NOMBRE, zona[Z_ID]))
-        )
         entidades.append(ZonaRegando(coordinador, zona[Z_ID], zona.get(Z_NOMBRE, zona[Z_ID])))
     async_add_entities(entidades)
 
@@ -38,18 +35,6 @@ class AplazadoPorLluvia(EntidadSistema, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         return bool((self.coordinator.data or {}).get("aplazado_lluvia"))
-
-
-class ZonaBloqueada(EntidadZona, BinarySensorEntity):
-    _attr_name = "Bloqueada"
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-
-    def __init__(self, coordinador: RiegoCoordinator, zid: str, nombre: str) -> None:
-        super().__init__(coordinador, zid, nombre, "bloqueada")
-
-    @property
-    def is_on(self) -> bool:
-        return bool(self._zona.get("bloqueada"))
 
 
 class ZonaRegando(EntidadZona, BinarySensorEntity):

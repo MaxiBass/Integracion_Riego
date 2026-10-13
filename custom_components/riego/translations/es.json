@@ -84,7 +84,6 @@
           "kc": "Kc mensual (12 valores separados por comas)",
           "topic": "Topic MQTT de la electroválvula",
           "caudal_defecto": "Caudal estimado inicial",
-          "sensor_estado": "Sensor de estado de la válvula",
           "sensor_caudal": "Sensor de caudal",
           "sensor_volumen_real": "Sensor de volumen del riego en curso",
           "sensor_duracion_real": "Sensor de duración del riego en curso"
@@ -94,8 +93,8 @@
           "techo": "Límite absoluto por ciclo. Debe quedar POR ENCIMA del máximo legítimo en el pico de verano; si recorta de forma habitual está racionando, no protegiendo.",
           "factor": "Multiplica a ETc antes de pasar a litros. Sirve para riego localizado (solo se moja parte del suelo) y para riego deficitario controlado. 1,0 = dosis FAO-56 íntegra.",
           "topic": "Por ejemplo zigbee2mqtt/Riego Frutales/set",
-          "sensor_estado": "Si reporta fuga o falta de agua, la zona no riega y conserva su déficit.",
-          "sensor_volumen_real": "Junto con la duración permite aprender el caudal real de la zona y afinar la hora de arranque."
+          "sensor_volumen_real": "Litros que cuenta la válvula en cada riego. Con el caudal, la integración comprueba lo que de verdad se regó y devuelve al déficit lo que no llegó; con la duración, aprende el caudal real de la zona.",
+          "sensor_caudal": "Con él la integración sabe si la zona está regando y, junto con el volumen, comprueba lo que de verdad se regó."
         }
       },
       "otra": {
@@ -207,11 +206,14 @@
           "kc": "Kc mensual (12 valores separados por comas)",
           "topic": "Topic MQTT de la electroválvula",
           "caudal_defecto": "Caudal estimado inicial",
-          "sensor_estado": "Sensor de estado de la válvula",
           "sensor_caudal": "Sensor de caudal",
           "sensor_volumen_real": "Sensor de volumen del riego en curso",
           "sensor_duracion_real": "Sensor de duración del riego en curso",
           "eliminar": "Eliminar esta zona"
+        },
+        "data_description": {
+          "sensor_caudal": "Con él la integración sabe si la zona está regando y, junto con el volumen, comprueba lo que de verdad se regó.",
+          "sensor_volumen_real": "Litros que cuenta la válvula en cada riego. Con el caudal, la integración comprueba lo que de verdad se regó y devuelve al déficit lo que no llegó; con la duración, aprende el caudal real de la zona."
         }
       }
     },

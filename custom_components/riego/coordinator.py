@@ -81,21 +81,23 @@ from .const import (
     DEFECTO_VIENTO_MINIMO,
     DOMAIN,
     EMA_ALFA,
+    ESPERA_COMPROBACION_SEGUNDOS,
     ESTADO_ACUMULANDO,
-    ESTADO_BLOQUEADA,
     ESTADO_DESHABILITADA,
     ESTADO_LISTA,
     ESTADO_REGANDO,
-    ESTADO_FUGA,
-    ESTADOS_FALLO,
     EVENTO,
     FORECAST_HORARIO,
     INTERVALO_ET0_SEGUNDOS,
+    MARGEN_COMPROBACION_MIN,
+    MAX_PRORROGAS_COMPROBACION,
     MODO_FIN_AMANECER,
     MODO_HORA_FIJA,
     MODO_OFFSET_AMANECER,
     STORAGE_KEY,
     STORAGE_VERSION,
+    TOLERANCIA_ENTREGA_L,
+    TOLERANCIA_ENTREGA_PCT,
     VOLUMEN_MIN_MUESTRA,
     Z_CAUDAL_DEFECTO,
     Z_FACTOR,
@@ -105,7 +107,6 @@ from .const import (
     Z_NOMBRE,
     Z_SENSOR_CAUDAL,
     Z_SENSOR_DURACION,
-    Z_SENSOR_ESTADO,
     Z_SENSOR_VOLUMEN,
     Z_TECHO,
     Z_TOPIC,
@@ -119,7 +120,6 @@ _LOGGER = logging.getLogger(__name__)
 # mensaje entero si quedan desparejados ("can't find end of the entity").
 ETIQUETAS = {
     "sin_riego": "sin riego",
-    "bloqueada": "bloqueada",
     "regado": "regado",
     "simulado": "simulado",
     "helada": "helada",
@@ -184,6 +184,8 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._desuscriptores: list[Any] = []
         self._ciclo_en_curso = False
         self._proximo: datetime | None = None
+        # Comprobaciones de entrega programadas, por zona
+        self._comprobaciones: dict[str, Any] = {}
         # Id de registro del dispositivo "Balance Hídrico". Lo rellena
         # async_setup_entry: las zonas lo necesitan para declararse como
         # dispositivos hijos suyos.
@@ -288,6 +290,8 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lluvia_total_desde": guardado.get("lluvia_total_desde"),
             "aplazado_lluvia": guardado.get("aplazado_lluvia", False),
             "saltar_proximo": guardado.get("saltar_proximo", False),
+            # Riegos enviados cuya entrega aún no se ha comprobado (§7.28)
+            "entregas": guardado.get("entregas", {}),
             "ultimo_ciclo": guardado.get("ultimo_ciclo"),
             "ultimo_ciclo_programado": guardado.get("ultimo_ciclo_programado"),
             "zonas": guardado.get("zonas", {}),
@@ -309,6 +313,8 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         )
         self._suscribir_caudales()
+        self._suscribir_entregas()
+        self._retomar_comprobaciones()
         # Recoge en el acto la lluvia caída con Home Assistant parado.
         self._integrar_lluvia()
         self._planificar()
@@ -321,6 +327,9 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for cancelar in (self._cancelar_ciclo, self._cancelar_planificador):
             if cancelar:
                 cancelar()
+        for cancelar in self._comprobaciones.values():
+            cancelar()
+        self._comprobaciones.clear()
         self._cancelar_ciclo = None
         self._cancelar_planificador = None
         await self._guardar()
@@ -763,6 +772,11 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         op = self.opciones
         resumen: dict[str, Any] = {"simulacion": simulacion, "zonas": {}}
 
+        # 0. Si quedó algún riego sin comprobar, se comprueba ahora: lo que no
+        # llegó tiene que estar en el déficit antes de calcular el de hoy.
+        for zid in list(self._estado["entregas"]):
+            await self._comprobar_entrega(zid)
+
         # 1. ET₀ del periodo y lluvia efectiva
         self._integrar_lluvia()  # la lluvia hasta este mismo minuto
         et0_periodo = float(self._estado["et0_acumulada"])
@@ -857,7 +871,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         desfase = int(self._opt(CONF_DESFASE_ZONAS, DEFECTO_DESFASE_ZONAS))
         primera = True
         for z in self.zonas:
-            zid, nombre = z[Z_ID], z.get(Z_NOMBRE, z[Z_ID])
+            zid = z[Z_ID]
             litros = self.volumen_objetivo(zid)
             detalle = {"litros": litros, "deficit_previo": self.deficit(zid)}
 
@@ -865,26 +879,6 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 detalle["resultado"] = "sin_riego"
                 resumen["zonas"][zid] = detalle
                 continue
-
-            if self._en_fallo(zid):
-                estado = self.hass.states.get(z.get(Z_SENSOR_ESTADO) or "")
-                detalle["resultado"] = "bloqueada"
-                detalle["estado_valvula"] = estado.state if estado else "desconocido"
-                resumen["zonas"][zid] = detalle
-                await self._avisar(
-                    f"⚠️ {nombre}: riego saltado, la válvula reporta "
-                    f"{detalle['estado_valvula']}. El déficit "
-                    f"({self.deficit(zid)} mm) se conserva."
-                )
-                continue
-
-            if self._estado_valvula(zid) == ESTADO_FUGA:
-                detalle["aviso_valvula"] = ESTADO_FUGA
-                await self._avisar(
-                    f"⚠️ {nombre}: la válvula marca fuga desde su último cierre. "
-                    "Se riega igualmente: al cerrar vuelve a comprobarlo. Si la "
-                    "marca sigue después de este riego, revisa que no gotee."
-                )
 
             if not primera and desfase > 0:
                 await self._dormir(desfase)
@@ -895,9 +889,14 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             m2 = float(self.valor_zona(zid, Z_M2, DEFECTO_M2))
             rt = self.runtime(zid)
+            comprobada = not simulacion and self._registrar_entrega(
+                zid, litros, m2, rt.get("ultimo_riego")
+            )
             rt["deficit"] = round(max(self.deficit(zid) - litros / max(m2, 1.0), 0.0), 2)
             rt["litros_hoy"] = float(litros)
-            rt["litros_temporada"] = round(float(rt.get("litros_temporada", 0.0)) + litros, 1)
+            if not comprobada:
+                # Si se va a comprobar, se suma al terminar lo que de verdad llegó.
+                rt["litros_temporada"] = round(float(rt.get("litros_temporada", 0.0)) + litros, 1)
             rt["ultimo_riego"] = dt_util.utcnow().isoformat()
             detalle["resultado"] = "simulado" if simulacion else "regado"
             detalle["deficit_posterior"] = rt["deficit"]
@@ -925,14 +924,180 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _dormir(self, segundos: int) -> None:
         await asyncio.sleep(segundos)
 
-    def _estado_valvula(self, zid: str) -> str | None:
-        """Estado que informa la propia electroválvula, si la zona lo tiene."""
-        ent = (self.zona(zid) or {}).get(Z_SENSOR_ESTADO)
-        estado = self.hass.states.get(ent) if ent else None
-        return estado.state if estado else None
+    # ── Comprobación de lo entregado (§7.28) ──────────────────────────
+    #
+    # La integración no bloquea el riego por el estado de la válvula: si falta
+    # agua, la propia válvula se cierra a los 30 min, y la marca de fuga solo
+    # se reevalúa al cerrar, así que bloquear por ella era un bloqueo sin
+    # salida (§7.27). A cambio, tras cada riego del ciclo se compara lo pedido
+    # con lo que la válvula dice haber dado y se devuelve al déficit lo que no
+    # llegó. El volumen de la válvula vuelve a 0 al empezar cada programa por
+    # volumen y cuenta litro a litro hasta cerrar.
 
-    def _en_fallo(self, zid: str) -> bool:
-        return self._estado_valvula(zid) in ESTADOS_FALLO
+    def _sensores_entrega(self, zid: str) -> tuple[str | None, str | None]:
+        cfg = self.zona(zid) or {}
+        return cfg.get(Z_SENSOR_CAUDAL), cfg.get(Z_SENSOR_VOLUMEN)
+
+    def _registrar_entrega(
+        self, zid: str, litros: int, m2: float, ultimo_riego_previo: str | None
+    ) -> bool:
+        """Apunta un riego recién enviado para comprobarlo cuando termine.
+
+        Devuelve False si la zona no tiene sensores con los que comprobarlo.
+        """
+        caudal, volumen = self._sensores_entrega(zid)
+        if not caudal or not volumen:
+            return False  # sin caudal y volumen de la válvula no hay qué comparar
+        ahora = dt_util.utcnow()
+        limite = (
+            ahora
+            + self.duracion_estimada(zid, litros) * 1.5
+            + timedelta(minutes=MARGEN_COMPROBACION_MIN)
+        )
+        self._estado["entregas"][zid] = {
+            "pedidos": float(litros),
+            "m2": m2,
+            "enviada": ahora.isoformat(),
+            "limite": limite.isoformat(),
+            "ultimo_riego_previo": ultimo_riego_previo,
+            # Se ha visto pasar agua desde el envío
+            "caudal_visto": False,
+            # Home Assistant ha estado en marcha todo el tiempo desde el envío:
+            # solo así «no se vio caudal» significa «no pasó agua».
+            "vigilada": True,
+            "prorrogas": 0,
+        }
+        self._programar_comprobacion(zid, limite)
+        return True
+
+    def _programar_comprobacion(self, zid: str, cuando: datetime) -> None:
+        if cancelar := self._comprobaciones.pop(zid, None):
+            cancelar()
+
+        @callback
+        def _disparar(_ahora: datetime) -> None:
+            self._comprobaciones.pop(zid, None)
+            self.hass.async_create_task(self._comprobar_entrega(zid))
+
+        self._comprobaciones[zid] = async_track_point_in_utc_time(self.hass, _disparar, cuando)
+
+    def _retomar_comprobaciones(self) -> None:
+        """Tras un arranque, vuelve a programar las comprobaciones pendientes.
+
+        Con Home Assistant parado se ha podido perder el paso del agua, así que
+        esas entregas ya no se pueden dar por vacías solo porque no se vea caudal.
+        """
+        pronto = dt_util.utcnow() + timedelta(minutes=2)
+        for zid, entrega in self._estado["entregas"].items():
+            entrega["vigilada"] = False
+            limite = dt_util.parse_datetime(entrega.get("limite") or "") or pronto
+            self._programar_comprobacion(zid, max(limite, pronto))
+
+    def _suscribir_entregas(self) -> None:
+        vigilados: dict[str, str] = {}
+        for z in self.zonas:
+            caudal, volumen = self._sensores_entrega(z[Z_ID])
+            if caudal and volumen:
+                vigilados[caudal] = z[Z_ID]
+        if not vigilados:
+            return
+
+        @callback
+        def _al_cambiar(evento) -> None:
+            zid = vigilados.get(evento.data["entity_id"])
+            entrega = self._estado["entregas"].get(zid) if zid else None
+            nuevo = evento.data.get("new_state")
+            if entrega is None or nuevo is None or nuevo.state in ("unknown", "unavailable", ""):
+                return
+            if _num(nuevo, 0.0) > 0:
+                if not entrega["caudal_visto"]:
+                    entrega["caudal_visto"] = True
+                    self.hass.async_create_task(self._guardar())
+            elif entrega["caudal_visto"] and _num(evento.data.get("old_state"), 0.0) > 0:
+                # Ha dejado de pasar agua: el volumen final y el estado de la
+                # válvula llegan en el medio minuto siguiente.
+                self._programar_comprobacion(
+                    zid, dt_util.utcnow() + timedelta(seconds=ESPERA_COMPROBACION_SEGUNDOS)
+                )
+
+        self._desuscriptores.append(
+            async_track_state_change_event(self.hass, list(vigilados), _al_cambiar)
+        )
+
+    async def _comprobar_entrega(self, zid: str) -> None:
+        """Compara lo pedido con lo regado y devuelve al déficit lo que falte."""
+        entrega = self._estado["entregas"].get(zid)
+        if entrega is None:
+            return
+        caudal, volumen = self._sensores_entrega(zid)
+        if (
+            _num(self.hass.states.get(caudal or ""), 0.0) > 0
+            and entrega["prorrogas"] < MAX_PRORROGAS_COMPROBACION
+        ):
+            # Aún pasa agua: se vuelve a mirar más tarde.
+            entrega["prorrogas"] += 1
+            await self._guardar()
+            self._programar_comprobacion(
+                zid, dt_util.utcnow() + timedelta(minutes=MARGEN_COMPROBACION_MIN)
+            )
+            return
+
+        del self._estado["entregas"][zid]
+        if cancelar := self._comprobaciones.pop(zid, None):
+            cancelar()
+
+        pedidos = float(entrega["pedidos"])
+        rt = self.runtime(zid)
+        # «Litros de la temporada» es total_increasing: nunca se le resta. En
+        # las zonas que se comprueban se le suma aquí lo que de verdad se dio.
+        temporada = float(rt.get("litros_temporada", 0.0))
+        if entrega["caudal_visto"]:
+            entregados = max(_num(self.hass.states.get(volumen or ""), 0.0), 0.0)
+        elif entrega["vigilada"]:
+            entregados = 0.0  # no pasó agua en ningún momento
+        else:
+            _LOGGER.info(
+                "Riego de %s sin comprobar: Home Assistant se reinició antes de "
+                "ver pasar el agua; se da por regado",
+                zid,
+            )
+            rt["litros_temporada"] = round(temporada + pedidos, 1)
+            await self._guardar()
+            await self.async_refresh()
+            return
+
+        rt["litros_temporada"] = round(temporada + entregados, 1)
+        rt["entrega"] = {
+            "pedidos": pedidos,
+            "entregados": entregados,
+            "comprobada": dt_util.utcnow().isoformat(),
+        }
+        falta = pedidos - entregados
+        tolerancia = max(pedidos * TOLERANCIA_ENTREGA_PCT, TOLERANCIA_ENTREGA_L)
+        if falta > tolerancia:
+            devuelto = falta / max(float(entrega["m2"]), 1.0)
+            maximo = float(self._opt(CONF_DEFICIT_MAXIMO, DEFECTO_DEFICIT_MAXIMO))
+            rt["deficit"] = round(min(self.deficit(zid) + devuelto, maximo), 2)
+            rt["litros_hoy"] = entregados
+            if entregados <= tolerancia:
+                rt["ultimo_riego"] = entrega.get("ultimo_riego_previo")
+            nombre = (self.zona(zid) or {}).get(Z_NOMBRE, zid)
+            await self._avisar(
+                f"⚠️ {nombre}: la válvula ha dado {entregados:.0f} de {pedidos:.0f} L. "
+                f"Se devuelven {devuelto:.2f} mm al déficit para el próximo ciclo. "
+                "Mira el estado de la válvula: puede faltar agua en la toma."
+            )
+            self._emitir(
+                "entrega_incompleta",
+                {
+                    "zona": zid,
+                    "pedidos": pedidos,
+                    "entregados": entregados,
+                    "deficit_devuelto_mm": round(devuelto, 2),
+                },
+            )
+        await self._guardar()
+        await self.async_refresh()
 
     async def _enviar(self, zona: dict[str, Any], litros: int) -> None:
         """Publica la orden de riego volumétrico en el topic de la zona.
@@ -1024,12 +1189,9 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             deficit = self.deficit(zid)
             umbral = float(self.valor_zona(zid, Z_UMBRAL, DEFECTO_UMBRAL))
             litros = self.volumen_objetivo(zid)
-            bloqueada = self._en_fallo(zid)
 
             if not self.habilitada(zid):
                 estado = ESTADO_DESHABILITADA
-            elif bloqueada:
-                estado = ESTADO_BLOQUEADA
             elif self._regando(zid):
                 estado = ESTADO_REGANDO
             elif deficit >= umbral:
@@ -1048,7 +1210,6 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "techo": float(self.valor_zona(zid, Z_TECHO, DEFECTO_TECHO)),
                 "factor": float(self.valor_zona(zid, Z_FACTOR, DEFECTO_FACTOR_ZONA)),
                 "habilitada": self.habilitada(zid),
-                "bloqueada": bloqueada,
                 "estado": estado,
                 "caudal": self.caudal(zid),
                 "duracion_min": round(
@@ -1057,6 +1218,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "litros_hoy": float(self.runtime(zid).get("litros_hoy", 0.0)),
                 "litros_temporada": float(self.runtime(zid).get("litros_temporada", 0.0)),
                 "ultimo_riego": self.runtime(zid).get("ultimo_riego"),
+                "entrega": self.runtime(zid).get("entrega") or {},
             }
 
         lluvia_medida, lluvia_fuente = self._lluvia_periodo()

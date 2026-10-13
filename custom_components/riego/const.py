@@ -71,7 +71,6 @@ Z_UMBRAL: Final = "umbral"
 Z_TECHO: Final = "techo"
 Z_KC: Final = "kc"
 Z_TOPIC: Final = "topic"
-Z_SENSOR_ESTADO: Final = "sensor_estado"
 Z_SENSOR_CAUDAL: Final = "sensor_caudal"
 Z_SENSOR_VOLUMEN: Final = "sensor_volumen_real"
 Z_SENSOR_DURACION: Final = "sensor_duracion_real"
@@ -125,17 +124,25 @@ DEFECTO_TECHO: Final = 800.0
 # y para riego deficitario controlado. 1,0 = dosis FAO-56 íntegra.
 DEFECTO_FACTOR_ZONA: Final = 1.0
 
-# Estados de la electroválvula que impiden regar: sin agua en la toma no tiene
-# sentido abrirla. El déficit se conserva.
-ESTADOS_FALLO: Final = (
-    "water_shortage",
-    "water_shortage & water_leakage",
-)
-# La fuga solo avisa. La válvula la comprueba unos 30 s después de cada cierre
-# y el resultado se queda hasta el cierre siguiente: bloquear el riego por ella
-# no cierra nada y además impide que se limpie, así que una falsa alarma
-# dejaba la zona sin regar indefinidamente (§7.27 en DECISIONES.md).
-ESTADO_FUGA: Final = "water_leakage"
+# ── Comprobación de lo que riega cada válvula (§7.28 en DECISIONES.md) ──
+# La integración no bloquea el riego por el estado de la válvula: si falta
+# agua, la propia válvula se cierra a los 30 min. A cambio, al terminar cada
+# riego compara lo pedido con lo que la válvula dice haber dado y devuelve al
+# déficit lo que no llegó.
+#
+# Al cerrar, la válvula publica el volumen final al segundo y su estado a los
+# ~33 s: se espera un minuto desde que el caudal vuelve a 0.
+ESPERA_COMPROBACION_SEGUNDOS: Final = 60
+# Si nunca se ve caudal, se comprueba pasado 1,5 veces lo que debía durar el
+# riego más este margen, que cubre la media hora tras la que la válvula se
+# cierra sola por falta de agua. Si a esa hora aún pasa agua, se vuelve a
+# mirar tras otro margen, hasta este número de veces.
+MARGEN_COMPROBACION_MIN: Final = 45
+MAX_PRORROGAS_COMPROBACION: Final = 4
+# Diferencia que se da por buena: la válvula cuenta litros enteros. Es la
+# misma tolerancia que usa el panel para marcar un riego con ✅.
+TOLERANCIA_ENTREGA_PCT: Final = 0.05
+TOLERANCIA_ENTREGA_L: Final = 5.0
 
 # Suavizado exponencial del caudal aprendido por zona.
 EMA_ALFA: Final = 0.3
@@ -148,4 +155,3 @@ ESTADO_DESHABILITADA: Final = "deshabilitada"
 ESTADO_ACUMULANDO: Final = "acumulando"
 ESTADO_LISTA: Final = "lista"
 ESTADO_REGANDO: Final = "regando"
-ESTADO_BLOQUEADA: Final = "bloqueada"

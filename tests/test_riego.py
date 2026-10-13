@@ -448,11 +448,11 @@ def _coordinador() -> None:
     ZONAS = [
         {"id": "frutales", "nombre": "Frutales", "m2": 140.0, "umbral": 0.5, "techo": 800.0,
          "factor": 1.0, "kc": [0.42, 0.42, 0.52, 0.63, 0.74, 0.76, 0.76, 0.76, 0.71, 0.63, 0.50, 0.42],
-         "topic": "z2m/Frutales/set", "sensor_estado": "sensor.f_estado",
+         "topic": "z2m/Frutales/set", "sensor_volumen_real": "sensor.f_volumen",
          "sensor_caudal": "sensor.f_caudal", "caudal_defecto": 289.0},
         {"id": "aptenia", "nombre": "Aptenia", "m2": 80.0, "umbral": 0.5, "techo": 450.0,
          "factor": 1.0, "kc": [0.32, 0.32, 0.40, 0.52, 0.62, 0.68, 0.68, 0.65, 0.55, 0.44, 0.36, 0.32],
-         "topic": "z2m/Aptenia/set", "sensor_estado": "sensor.a_estado", "caudal_defecto": 286.0},
+         "topic": "z2m/Aptenia/set", "caudal_defecto": 286.0},
     ]
 
     class Estados:
@@ -498,7 +498,10 @@ def _coordinador() -> None:
         c._estado = {"et0_acumulada": 0.0, "et0_periodo_anterior": 0.0, "et0_previa": 0.0,
                      "ultima_integracion": None, "aplazado_lluvia": False,
                      "lluvia_acumulada": 0.0, "ultimo_ciclo": None, "zonas": {},
-                     "simulacion": simulacion}
+                     "entregas": {}, "simulacion": simulacion}
+        # Sin temporizadores reales sobre un hass simulado; la programación de
+        # las comprobaciones se prueba aparte.
+        c._programar_comprobacion = MagicMock()
         for z in ZONAS:
             c.runtime(z["id"]).update({"deficit": 0.0, "litros_hoy": 0.0, "litros_temporada": 0.0})
 
@@ -506,9 +509,8 @@ def _coordinador() -> None:
         hass.states.set("sensor.hum", 55)
         hass.states.set("sensor.rad", 0.0)
         hass.states.set("sensor.lluvia", 0.0)
-        hass.states.set("sensor.f_estado", "normal_state")
-        hass.states.set("sensor.a_estado", "normal_state")
         hass.states.set("sensor.f_caudal", 0.0)
+        hass.states.set("sensor.f_volumen", 0)
         return c, hass
 
     publicados: list[tuple[str, dict]] = []
@@ -560,37 +562,132 @@ def _coordinador() -> None:
     comprobar(not publicados, "no se publica nada con helada")
     comprobar(c.deficit("frutales") > 2.0, "el déficit se conserva tras la helada")
 
-    # 4. Válvula sin agua: esa zona no riega, la otra sí
-    for estado in ("water_shortage", "water_shortage & water_leakage"):
+    # 4. El estado de la válvula ya no bloquea el riego: la válvula se protege
+    # sola (se cierra a los 30 min si falta agua) y bloquear por la fuga dejó
+    # Cipreses cuatro días sin regar (§7.27). A cambio, se comprueba lo que de
+    # verdad regó cada válvula y se devuelve al déficit lo que no llegó (§7.28).
+    from types import SimpleNamespace
+
+    def regar_frutales():
         c, hass = construir()
-        c._estado["et0_acumulada"] = 3.10
-        hass.states.set("sensor.f_estado", estado)
+        hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
+        c._estado["et0_acumulada"] = 3.10        # 3.10 × 0.71 × 140 = 308 L
         publicados.clear()
         with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
-            resumen = asyncio.run(c.ejecutar_ciclo())
-        comprobar(resumen["zonas"]["frutales"]["resultado"] == "bloqueada",
-                  f"con {estado} Frutales se marca bloqueada")
-        comprobar(not any("Frutales" in t for t, _ in publicados), "no se riega la zona bloqueada")
-        comprobar(any("Aptenia" in t for t, _ in publicados), "la otra zona sí riega")
-        comprobar(c.deficit("frutales") > 2.0, "la zona bloqueada conserva su déficit")
+            asyncio.run(c.ejecutar_ciclo())
+        return c, hass
 
-    # 4b. La fuga solo avisa. La válvula la comprueba al cerrarse y no la
-    # limpia hasta el cierre siguiente: bloquear por ella dejó Cipreses cuatro
-    # días sin regar (09/10–12/10) por una falsa alarma.
-    c, hass = construir()
+    def avisos_de(hass):
+        return [ll.args[2]["message"] for ll in hass.services.async_call.call_args_list
+                if ll.args[:2] == ("notify", "send_message")]
+
+    c, hass = regar_frutales()
+    entrega = c._estado["entregas"].get("frutales")
+    comprobar(entrega is not None and entrega["pedidos"] == 308.0,
+              "tras enviar 308 L a Frutales queda pendiente comprobarlo")
+    comprobar("aptenia" not in c._estado["entregas"],
+              "una zona sin sensores de caudal y volumen no se comprueba")
+    comprobar(c._programar_comprobacion.called, "se programa la comprobación de respaldo")
+    comprobar(c.runtime("frutales")["litros_temporada"] == 0.0
+              and c.runtime("aptenia")["litros_temporada"] == 137.0,
+              "la zona que se comprueba suma a la temporada al terminar; la otra, al enviar")
+
+    # 4a. Entrega completa
+    entrega["caudal_visto"] = True
+    hass.states.set("sensor.f_volumen", 308)
+    asyncio.run(c._comprobar_entrega("frutales"))
+    rt = c.runtime("frutales")
+    comprobar(casi(c.deficit("frutales"), 0.0, 0.01) and rt["litros_temporada"] == 308.0
+              and rt["entrega"]["entregados"] == 308.0,
+              "si la válvula da lo pedido, el déficit no cambia y la temporada suma 308 L")
+    comprobar("frutales" not in c._estado["entregas"], "la entrega comprobada sale de pendientes")
+    comprobar(not any("ha dado" in a for a in avisos_de(hass)), "sin aviso cuando todo cuadra")
+
+    # 4b. Falta de agua: no pasa agua en ningún momento
+    c, hass = regar_frutales()
+    asyncio.run(c._comprobar_entrega("frutales"))
+    rt = c.runtime("frutales")
+    comprobar(casi(c.deficit("frutales"), 2.2, 0.01),
+              f"sin agua se devuelven los 2.2 mm al déficit (queda {c.deficit('frutales')} mm)")
+    comprobar(rt["litros_hoy"] == 0.0 and rt["litros_temporada"] == 0.0
+              and rt.get("ultimo_riego") is None,
+              "ni el último ciclo, ni la temporada, ni el último riego cuentan ese riego")
+    comprobar(any("0 de 308 L" in a for a in avisos_de(hass)), "se avisa de lo que no llegó")
+
+    # 4c. Riego a medias
+    c, hass = regar_frutales()
+    c._estado["entregas"]["frutales"]["caudal_visto"] = True
+    hass.states.set("sensor.f_volumen", 150)
+    asyncio.run(c._comprobar_entrega("frutales"))
+    comprobar(casi(c.deficit("frutales"), 158 / 140, 0.01)
+              and c.runtime("frutales")["litros_temporada"] == 150.0,
+              "si da 150 de 308 L, vuelven al déficit los 158 L que faltan y la temporada suma 150")
+
+    # 4d. Dentro de la tolerancia: la válvula cuenta litros enteros
+    c, hass = regar_frutales()
+    c._estado["entregas"]["frutales"]["caudal_visto"] = True
+    hass.states.set("sensor.f_volumen", 300)
+    asyncio.run(c._comprobar_entrega("frutales"))
+    comprobar(casi(c.deficit("frutales"), 0.0, 0.01), "8 L de 308 entran en la tolerancia del 5 %")
+
+    # 4e. Aún pasa agua: se vuelve a mirar más tarde
+    c, hass = regar_frutales()
+    c._estado["entregas"]["frutales"]["caudal_visto"] = True
+    hass.states.set("sensor.f_caudal", 280.0)
+    asyncio.run(c._comprobar_entrega("frutales"))
+    comprobar(c._estado["entregas"]["frutales"]["prorrogas"] == 1,
+              "si aún pasa agua, la comprobación se aplaza")
+
+    # 4f. Home Assistant se reinició y no vio el riego: no se toca el déficit
+    c, hass = regar_frutales()
+    c._retomar_comprobaciones()
+    asyncio.run(c._comprobar_entrega("frutales"))
+    comprobar(casi(c.deficit("frutales"), 0.0, 0.01)
+              and c.runtime("frutales")["litros_temporada"] == 308.0,
+              "tras un reinicio sin ver el agua se da por regado, como antes de v0.6.0")
+
+    # 4g. El ciclo siguiente resuelve antes lo pendiente
+    c, hass = regar_frutales()                   # no llega el agua
     c._estado["et0_acumulada"] = 3.10
-    hass.states.set("sensor.f_estado", "water_leakage")
     publicados.clear()
     with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
-        resumen = asyncio.run(c.ejecutar_ciclo())
-    frutales = resumen["zonas"]["frutales"]
-    comprobar(frutales["resultado"] == "regado" and any("Frutales" in t for t, _ in publicados),
-              "con water_leakage la zona riega igualmente")
-    comprobar(frutales.get("aviso_valvula") == "water_leakage", "el resumen del ciclo recoge el aviso")
-    comprobar(not c._en_fallo("frutales"), "una fuga no cuenta como zona bloqueada")
-    avisos = [ll.args[2]["message"] for ll in hass.services.async_call.call_args_list
-              if ll.args[:2] == ("notify", "send_message")]
-    comprobar(any("Frutales" in a and "fuga" in a for a in avisos), "se avisa de la fuga")
+        asyncio.run(c.ejecutar_ciclo())
+    litros = next(p for t, p in publicados if "Frutales" in t)["cyclic_quantitative_irrigation"]["irrigation_capacity"]
+    comprobar(litros == 616, f"el ciclo siguiente repone lo que no llegó más lo de hoy: {litros} L (esperado 616)")
+
+    # 4h. El caudal marca el final del riego
+    c, hass = regar_frutales()
+    with patch.object(mod, "async_track_state_change_event") as seguir:
+        c._suscribir_entregas()
+    entidades, al_cambiar = seguir.call_args.args[1], seguir.call_args.args[2]
+    comprobar(entidades == ["sensor.f_caudal"], "se vigila el caudal de las zonas con sensores")
+
+    def evento(viejo, nuevo):
+        return SimpleNamespace(data={
+            "entity_id": "sensor.f_caudal",
+            "old_state": State("sensor.f_caudal", str(viejo)),
+            "new_state": State("sensor.f_caudal", str(nuevo)),
+        })
+
+    c._programar_comprobacion.reset_mock()
+    al_cambiar(evento(0.0, 280.0))
+    comprobar(c._estado["entregas"]["frutales"]["caudal_visto"], "al pasar agua se apunta que hubo caudal")
+    al_cambiar(evento(280.0, "unavailable"))
+    comprobar(not c._programar_comprobacion.called,
+              "un caudal no disponible no se toma por el final del riego")
+    al_cambiar(evento(280.0, 0.0))
+    cuando = c._programar_comprobacion.call_args.args[1] if c._programar_comprobacion.called else None
+    segundos = (cuando - mod.dt_util.utcnow()).total_seconds() if cuando else -1
+    comprobar(50 < segundos <= 60, f"al volver el caudal a 0 se comprueba al cabo de un minuto ({segundos:.0f} s)")
+
+    # 4i. La comprobación programada se ejecuta
+    c, hass = construir()
+    with patch.object(mod, "async_track_point_in_utc_time") as programar:
+        RiegoCoordinator._programar_comprobacion(c, "frutales", mod.dt_util.utcnow())
+    c._comprobar_entrega = AsyncMock()
+    hass.async_create_task = MagicMock(side_effect=lambda coro: asyncio.run(coro))
+    programar.call_args.args[1](None)
+    comprobar(c._comprobar_entrega.await_count == 1, "al llegar la hora se comprueba la entrega")
 
     # 5. Modo simulación: se calcula todo pero no se abre ninguna válvula
     c, hass = construir(simulacion=True)
@@ -888,7 +985,10 @@ def _coordinador() -> None:
 
 
 def test_entidades_retiradas() -> None:
-    """Los number retirados en v0.5.0 se borran del registro al arrancar."""
+    """Las entidades retiradas se borran del registro al arrancar.
+
+    Los number en v0.5.0 y binary_sensor.<zona>_bloqueada en v0.6.0.
+    """
     from types import SimpleNamespace
     from unittest.mock import MagicMock, patch
 
@@ -896,16 +996,22 @@ def test_entidades_retiradas() -> None:
 
     print("\nEntidades retiradas")
     registro = MagicMock()
-    entradas = [SimpleNamespace(entity_id=e, domain=e.split(".")[0]) for e in (
-        "number.zona_frutales_superficie", "number.zona_frutales_coeficiente_de_ajuste",
-        "sensor.zona_frutales_deficit_acumulado", "switch.zona_frutales_habilitada",
+    entradas = [SimpleNamespace(entity_id=e, domain=e.split(".")[0], unique_id=u) for e, u in (
+        ("number.zona_frutales_superficie", "x_frutales_superficie"),
+        ("number.zona_frutales_coeficiente_de_ajuste", "x_frutales_factor"),
+        ("binary_sensor.zona_frutales_bloqueada", "x_frutales_bloqueada"),
+        ("binary_sensor.zona_frutales_regando", "x_frutales_regando"),
+        ("sensor.zona_frutales_deficit_acumulado", "x_frutales_deficit"),
+        ("switch.zona_frutales_habilitada", "x_frutales_habilitada"),
     )]
     with patch.object(integracion.er, "async_get", return_value=registro), \
          patch.object(integracion.er, "async_entries_for_config_entry", return_value=entradas):
         integracion._borrar_entidades_retiradas(MagicMock(), MagicMock(entry_id="x"))
     borradas = sorted(ll.args[0] for ll in registro.async_remove.call_args_list)
-    comprobar(borradas == ["number.zona_frutales_coeficiente_de_ajuste", "number.zona_frutales_superficie"],
-              f"se borran los number y nada más: {borradas}")
+    comprobar(borradas == ["binary_sensor.zona_frutales_bloqueada",
+                           "number.zona_frutales_coeficiente_de_ajuste",
+                           "number.zona_frutales_superficie"],
+              f"se borran los number y el sensor de zona bloqueada, y nada más: {borradas}")
     comprobar("number" not in [p.value for p in integracion.PLATFORMS], "la plataforma number ya no se carga")
 
 

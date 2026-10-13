@@ -27,11 +27,14 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
 ]
 
-# Plataformas que la integración tuvo y ya no publica. Sus entidades se
-# borran del registro al arrancar; si no, quedarían para siempre como «ya no
-# las proporciona la integración». Los number de zona se retiraron en v0.5.0:
-# los ajustes se cambian solo en «Configurar» (§7.25 en DECISIONES.md).
+# Entidades que la integración tuvo y ya no publica. Se borran del registro
+# al arrancar; si no, quedarían para siempre como «ya no las proporciona la
+# integración».
+# - Los number, en v0.5.0: los ajustes se cambian solo en «Configurar» (§7.25).
+# - binary_sensor.<zona>_bloqueada, en v0.6.0: el estado de la válvula ya no
+#   bloquea el riego (§7.28).
 PLATAFORMAS_RETIRADAS = ("number",)
+ENTIDADES_RETIRADAS = (("binary_sensor", "_bloqueada"),)
 
 RUTA_ESTATICA = "/riego_static"
 FICHERO_ESTRATEGIA = "riego-strategy.js"
@@ -106,7 +109,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 def _borrar_entidades_retiradas(hass: HomeAssistant, entry: ConfigEntry) -> None:
     registro = er.async_get(hass)
     for entidad in er.async_entries_for_config_entry(registro, entry.entry_id):
-        if entidad.domain in PLATAFORMAS_RETIRADAS:
+        if entidad.domain in PLATAFORMAS_RETIRADAS or any(
+            entidad.domain == dominio and str(entidad.unique_id).endswith(sufijo)
+            for dominio, sufijo in ENTIDADES_RETIRADAS
+        ):
             _LOGGER.info("Se retira %s: ya no la publica la integración", entidad.entity_id)
             registro.async_remove(entidad.entity_id)
 

@@ -68,7 +68,6 @@ const porZona = (z) => [
   `sensor.zona_${z}_litros_del_ultimo_ciclo`,
   `sensor.zona_${z}_litros_de_la_temporada`,
   `sensor.zona_${z}_ultimo_riego`,
-  `binary_sensor.zona_${z}_bloqueada`,
   `binary_sensor.zona_${z}_regando`,
   `switch.zona_${z}_habilitada`,
 ];

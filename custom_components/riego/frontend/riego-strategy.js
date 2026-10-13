@@ -134,7 +134,7 @@ function plantillaResumen(zonas) {
     .map(({ nombre, entidades }) => {
       const e = (s) => porSufijo(entidades, s) || "";
       return `('${etiquetaZona(nombre).replace(/'/g, "")}','${e("estado")}',` +
-        `'${e("deficit_acumulado")}','${e("bloqueada")}','${e("habilitada")}')`;
+        `'${e("deficit_acumulado")}','${e("habilitada")}')`;
     })
     .join(",");
 
@@ -150,7 +150,7 @@ function plantillaResumen(zonas) {
 {%- set et0p = states('SENSOR_ET0_ACUM') | float(0) -%}
 {%- set lluvia = states('SENSOR_LLUVIA') | float(0) -%}
 {%- set ns = namespace(total=0) -%}
-{%- for nom, est, def, blo, hab in zonas -%}
+{%- for nom, est, def, hab in zonas -%}
 {%- set d = states(def) | float(0) -%}
 {%- set kc = state_attr(def, 'kc_mes') | float(0) -%}
 {%- set factor = state_attr(def, 'factor_zona') | float(1) -%}
@@ -176,7 +176,7 @@ El déficit se está acumulando para el próximo ciclo.
 
 | Zona | Estado | Déficit + hoy | Previsto |
 |:--|:--|--:|--:|
-{% for nom, est, def, blo, hab in zonas -%}
+{% for nom, est, def, hab in zonas -%}
 {%- set d = states(def) | float(0) -%}
 {%- set kc = state_attr(def, 'kc_mes') | float(0) -%}
 {%- set factor = state_attr(def, 'factor_zona') | float(1) -%}
@@ -191,10 +191,7 @@ El déficit se está acumulando para el próximo ciclo.
 ET₀ periodo anterior **{{ states('SENSOR_ET0_ANTERIOR') }} mm** ·
 acumulada **{{ states('SENSOR_ET0_ACUM') }} mm** ·
 lluvia efectiva **{{ states('SENSOR_LLUVIA') }} mm**
-{% for nom, est, def, blo, hab in zonas -%}
-{%- if blo and is_state(blo,'on') %}
-⛔ {{ nom }} bloqueada — el riego se salta y el déficit se conserva
-{% endif -%}
+{% for nom, est, def, hab in zonas -%}
 {%- if hab and is_state(hab,'off') %}
 ⏸️ {{ nom }} deshabilitada
 {% endif -%}

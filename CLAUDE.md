@@ -76,6 +76,12 @@ Consecuencias para quien edite esto:
 - **Los ajustes se cambian solo en Configurar** (desde v0.5.0 no hay `number`);
   los interruptores (simulación, zona habilitada, saltar el próximo riego),
   solo con su switch. No reintroducir un ajuste en dos sitios (§7.25).
+- **El estado de la válvula no bloquea el riego** (desde v0.6.0). La válvula
+  se cierra sola si falta agua, y su marca de fuga solo se reevalúa al cerrar:
+  bloquear por ella dejó Cipreses cuatro días sin regar (§7.27). En su lugar,
+  la integración comprueba lo regado y devuelve al déficit lo que no llegó
+  (§7.28). No reintroducir bloqueos ni avisos de estado de la válvula: esos
+  avisos ya los da «Notificaciones Riego Telegram 1».
 - **No te fíes de `switch.riego_*` para saber si una válvula riega**: puede
   quedarse en `on` horas después de cerrar (§7.22). Lo fiable es el caudal
   (`sensor.riego_*_flow`, que es lo que usa la integración) o
