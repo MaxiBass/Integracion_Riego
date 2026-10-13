@@ -22,7 +22,7 @@ Historial de decisiones, hallazgos de la revisión y plan de migración:
 - **Hora de inicio calculada hacia atrás desde el amanecer**, estimando la
   duración con el caudal que aprende de cada zona.
 - **Protecciones**: helada, lluvia prevista (aplazamiento de un día, por
-  milímetros previstos o por horas con probabilidad alta) y válvula en fallo
+  milímetros previstos o por horas con probabilidad alta) y válvula sin agua
   — en los tres casos el déficit se conserva.
 - **Un solo sitio para cada cosa**: los ajustes (superficie, umbral, techo,
   coeficiente, Kc, previsión) se cambian en **Configurar**, y el panel solo

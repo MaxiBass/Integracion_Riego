@@ -125,12 +125,17 @@ DEFECTO_TECHO: Final = 800.0
 # y para riego deficitario controlado. 1,0 = dosis FAO-56 íntegra.
 DEFECTO_FACTOR_ZONA: Final = 1.0
 
-# Estados de la electroválvula que impiden regar. El déficit se conserva.
+# Estados de la electroválvula que impiden regar: sin agua en la toma no tiene
+# sentido abrirla. El déficit se conserva.
 ESTADOS_FALLO: Final = (
-    "water_leakage",
     "water_shortage",
     "water_shortage & water_leakage",
 )
+# La fuga solo avisa. La válvula la comprueba unos 30 s después de cada cierre
+# y el resultado se queda hasta el cierre siguiente: bloquear el riego por ella
+# no cierra nada y además impide que se limpie, así que una falsa alarma
+# dejaba la zona sin regar indefinidamente (§7.27 en DECISIONES.md).
+ESTADO_FUGA: Final = "water_leakage"
 
 # Suavizado exponencial del caudal aprendido por zona.
 EMA_ALFA: Final = 0.3

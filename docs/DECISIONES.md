@@ -1267,3 +1267,52 @@ Consecuencias:
 casa ni a nadie (coordenadas, IPs públicas, nombres, matrículas, ids de
 dispositivos). Los datos meteorológicos reales del 12/09 que usa la prueba
 de ET₀ sí pueden quedarse: no dicen dónde está nadie.
+
+### 7.27 La fuga de la válvula ya no bloquea el riego (v0.5.1)
+
+Cipreses no regó del 10/10 al 13/10. El 09/10, a los 33 s de cerrar tras regar
+126 L, su válvula pasó a informar `water_leakage`, y la integración la bloqueó
+como hacía con cualquier estado de fallo. No había fuga: el caudal marcaba 0 y
+Maxi no vio que goteara. El 13/10 la abrió y cerró a mano, y a los 33 s
+volvió a `normal_state`.
+
+El historial muestra siempre el mismo patrón:
+
+| Fecha | Qué pasó | Estado 33 s después |
+|:--|:--|:--|
+| 23/09 | Cierre tras regar | `water_leakage` (37 h) |
+| 24/09 | Apertura y cierre a mano | `normal_state` |
+| 09/10 | Cierre tras regar | `water_leakage` (4 días) |
+| 13/10 | Apertura y cierre a mano | `normal_state` |
+
+La documentación de Zigbee2MQTT no explica cómo se detecta la fuga ni cómo se
+borra; solo dice que el dato es de solo lectura. Una reseña la describe como
+un hilillo de agua que pasa con la válvula cerrada. Lo que se deduce de los
+datos: la válvula comprueba si gotea unos 30 s después de cada cierre, y el
+resultado se queda hasta el cierre siguiente. Con ese funcionamiento,
+bloquear el riego por fuga era un callejón sin salida. La integración no
+abría la válvula, la válvula no se volvía a cerrar y la marca no se borraba
+nunca. Además, bloquear no protegía de nada: no cierra la válvula, y si de
+verdad gotea cerrada, regar no lo empeora.
+
+Desde v0.5.1:
+
+- **`water_shortage`** (sin agua en la toma) sigue bloqueando, también
+  combinado con fuga: abrir sin agua no sirve de nada.
+- **`water_leakage`** solo avisa por Telegram y riega igualmente. El riego
+  vuelve a disparar la comprobación al cerrar, así que una falsa alarma se
+  borra sola en el siguiente ciclo. Si la marca sigue después de regar,
+  entonces sí conviene revisar la válvula.
+- Una fuga grande, con agua pasando a caudal normal con la válvula parada, ya
+  la detecta aparte la automatización «Vigilancia de caudal anómalo»
+  (§7.17, §7.22).
+
+Ya pasó en septiembre (§2.5): entonces se resolvió con
+`binary_sensor.<zona>_bloqueada`, para que se viera, pero el bloqueo seguía.
+
+De paso se vio que `real_time_irrigation_volume` acumula entre aperturas
+manuales: tras la prueba del 13/10 marcaba 142 L (126 + 16). Es la incidencia
+[Koenkk/zigbee2mqtt#32918](https://github.com/Koenkk/zigbee2mqtt/issues/32918).
+Un programa de riego por volumen sí lo pone a cero (Frutales y Aptenia
+coinciden con su último ciclo), así que a la integración no le afecta. Solo
+movió un poco el caudal aprendido de Cipreses (274 → 278,5 L/h).

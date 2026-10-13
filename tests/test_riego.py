@@ -560,17 +560,37 @@ def _coordinador() -> None:
     comprobar(not publicados, "no se publica nada con helada")
     comprobar(c.deficit("frutales") > 2.0, "el déficit se conserva tras la helada")
 
-    # 4. Válvula en fallo: esa zona no riega, la otra sí
+    # 4. Válvula sin agua: esa zona no riega, la otra sí
+    for estado in ("water_shortage", "water_shortage & water_leakage"):
+        c, hass = construir()
+        c._estado["et0_acumulada"] = 3.10
+        hass.states.set("sensor.f_estado", estado)
+        publicados.clear()
+        with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
+            resumen = asyncio.run(c.ejecutar_ciclo())
+        comprobar(resumen["zonas"]["frutales"]["resultado"] == "bloqueada",
+                  f"con {estado} Frutales se marca bloqueada")
+        comprobar(not any("Frutales" in t for t, _ in publicados), "no se riega la zona bloqueada")
+        comprobar(any("Aptenia" in t for t, _ in publicados), "la otra zona sí riega")
+        comprobar(c.deficit("frutales") > 2.0, "la zona bloqueada conserva su déficit")
+
+    # 4b. La fuga solo avisa. La válvula la comprueba al cerrarse y no la
+    # limpia hasta el cierre siguiente: bloquear por ella dejó Cipreses cuatro
+    # días sin regar (09/10–12/10) por una falsa alarma.
     c, hass = construir()
     c._estado["et0_acumulada"] = 3.10
     hass.states.set("sensor.f_estado", "water_leakage")
     publicados.clear()
     with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
         resumen = asyncio.run(c.ejecutar_ciclo())
-    comprobar(resumen["zonas"]["frutales"]["resultado"] == "bloqueada", "Frutales se marca bloqueada")
-    comprobar(not any("Frutales" in t for t, _ in publicados), "no se riega la zona bloqueada")
-    comprobar(any("Aptenia" in t for t, _ in publicados), "la otra zona sí riega")
-    comprobar(c.deficit("frutales") > 2.0, "la zona bloqueada conserva su déficit")
+    frutales = resumen["zonas"]["frutales"]
+    comprobar(frutales["resultado"] == "regado" and any("Frutales" in t for t, _ in publicados),
+              "con water_leakage la zona riega igualmente")
+    comprobar(frutales.get("aviso_valvula") == "water_leakage", "el resumen del ciclo recoge el aviso")
+    comprobar(not c._en_fallo("frutales"), "una fuga no cuenta como zona bloqueada")
+    avisos = [ll.args[2]["message"] for ll in hass.services.async_call.call_args_list
+              if ll.args[:2] == ("notify", "send_message")]
+    comprobar(any("Frutales" in a and "fuga" in a for a in avisos), "se avisa de la fuga")
 
     # 5. Modo simulación: se calcula todo pero no se abre ninguna válvula
     c, hass = construir(simulacion=True)

@@ -86,6 +86,7 @@ from .const import (
     ESTADO_DESHABILITADA,
     ESTADO_LISTA,
     ESTADO_REGANDO,
+    ESTADO_FUGA,
     ESTADOS_FALLO,
     EVENTO,
     FORECAST_HORARIO,
@@ -877,6 +878,14 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 continue
 
+            if self._estado_valvula(zid) == ESTADO_FUGA:
+                detalle["aviso_valvula"] = ESTADO_FUGA
+                await self._avisar(
+                    f"⚠️ {nombre}: la válvula marca fuga desde su último cierre. "
+                    "Se riega igualmente: al cerrar vuelve a comprobarlo. Si la "
+                    "marca sigue después de este riego, revisa que no gotee."
+                )
+
             if not primera and desfase > 0:
                 await self._dormir(desfase)
             primera = False
@@ -916,13 +925,14 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _dormir(self, segundos: int) -> None:
         await asyncio.sleep(segundos)
 
+    def _estado_valvula(self, zid: str) -> str | None:
+        """Estado que informa la propia electroválvula, si la zona lo tiene."""
+        ent = (self.zona(zid) or {}).get(Z_SENSOR_ESTADO)
+        estado = self.hass.states.get(ent) if ent else None
+        return estado.state if estado else None
+
     def _en_fallo(self, zid: str) -> bool:
-        cfg = self.zona(zid) or {}
-        ent = cfg.get(Z_SENSOR_ESTADO)
-        if not ent:
-            return False
-        estado = self.hass.states.get(ent)
-        return estado is not None and estado.state in ESTADOS_FALLO
+        return self._estado_valvula(zid) in ESTADOS_FALLO
 
     async def _enviar(self, zona: dict[str, Any], litros: int) -> None:
         """Publica la orden de riego volumétrico en el topic de la zona.
