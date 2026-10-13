@@ -13,10 +13,18 @@ da 404 incluso con GitHub autenticado).
 - El HA real está montado por Samba en el Mac:
   - `/Volumes/config/custom_components/riego` → donde HACS instala
     finalmente la integración
-- Esta sesión de Claude Code **no tiene credenciales de GitHub** ni `gh`
-  instalado: puede hacer `git add` y `git commit`, pero **no puede hacer
-  `git push` ni crear el repositorio remoto**. Eso lo hace siempre el
-  usuario, normalmente desde GitHub Desktop.
+- Desde el 13/10/2026 hay **GitHub CLI** (`gh`, sesión de MaxiBass con permiso
+  `repo`). Claude Code puede hacer push **cuando Maxi lo pida**, sin tocar la
+  configuración global de git:
+  `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin main`.
+  Antes, revisar que el diff no lleve datos personales: el repo es público.
+- **HACS sigue commits, no versiones** (el repo no publica releases): cada
+  push aparece como actualización. Para instalar sin pasar por la interfaz,
+  `update.install` sobre `update.riego_por_balance_hidrico_update` con
+  `version` = el hash **corto** del commit. Con el largo, HACS guarda un valor
+  distinto del que compara y deja una actualización fantasma. Antes de
+  reiniciar, comparar los ficheros de `/Volumes/config/custom_components/riego`
+  con el repo.
 - Un clasificador de seguridad automático puede bloquear `git add` sobre
   archivos cuyo nombre suene a secreto aunque no tengan datos sensibles
   reales. Si pasa, que el usuario haga ese `git add` puntual él mismo.
@@ -106,10 +114,11 @@ Frutales, 24 h después de un riego). Ver §4.3.
 ## Flujo para editar la integración
 
 1. Editar los archivos **en el repo**, dentro de `custom_components/riego/`.
-2. Commit en el repo (yo puedo). Push lo hace el usuario.
+2. Commit en el repo. Push: Maxi, o Claude Code con `gh` si se lo pide.
 3. Subir el número de `version` en `manifest.json` cuando el cambio esté
    listo para probarse — HACS detecta la actualización por ese número.
-4. El usuario actualiza desde HACS y reinicia HA para probar.
+4. Se actualiza desde HACS (o con `update.install`, ver arriba) y se
+   reinicia HA para probar.
 5. Si algo falla, se corrige, se sube la versión otra vez, commit, push,
    actualizar, reiniciar.
 
