@@ -328,8 +328,7 @@ class RiegoConfigFlow(ConfigFlow, domain=DOMAIN):
         self._datos: dict[str, Any] = {}
 
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
-        if self._async_current_entries():
-            return self.async_abort(reason="single_instance_allowed")
+        # Una sola entrada: lo impone "single_config_entry" del manifest.
         if user_input is not None:
             if errores := _validar_meteo(user_input):
                 return self.async_show_form(
@@ -403,8 +402,24 @@ class RiegoOptionsFlow(OptionsFlow):
             menu_options=["meteo", "prevision", "ciclo", "zonas"],
         )
 
-    async def _guardar(self, cambios: dict[str, Any]) -> ConfigFlowResult:
-        nuevas = {**self.config_entry.options, **cambios}
+    async def _guardar(
+        self, cambios: dict[str, Any], esquema: vol.Schema | None = None
+    ) -> ConfigFlowResult:
+        """Guarda los cambios de un paso encima de las opciones actuales.
+
+        Un campo opcional que se vacía no llega en `cambios`: Home Assistant
+        omite la clave. Por eso las opcionales del paso que no vengan se
+        guardan como None; si no, se conservaría el sensor anterior y sería
+        imposible quitarlo (§7.29).
+        """
+        vaciados = {}
+        if esquema is not None:
+            vaciados = {
+                str(clave): None
+                for clave in esquema.schema
+                if isinstance(clave, vol.Optional) and str(clave) not in cambios
+            }
+        nuevas = {**self.config_entry.options, **vaciados, **cambios}
         return self.async_create_entry(title="", data=nuevas)
 
     async def async_step_meteo(self, user_input=None) -> ConfigFlowResult:
@@ -413,19 +428,19 @@ class RiegoOptionsFlow(OptionsFlow):
                 return self.async_show_form(
                     step_id="meteo", data_schema=esquema_meteo(user_input), errors=errores
                 )
-            return await self._guardar(user_input)
+            return await self._guardar(user_input, esquema_meteo({}))
         return self.async_show_form(step_id="meteo", data_schema=esquema_meteo(self._valores))
 
     async def async_step_prevision(self, user_input=None) -> ConfigFlowResult:
         if user_input is not None:
-            return await self._guardar(user_input)
+            return await self._guardar(user_input, esquema_prevision({}))
         return self.async_show_form(
             step_id="prevision", data_schema=esquema_prevision(self._valores)
         )
 
     async def async_step_ciclo(self, user_input=None) -> ConfigFlowResult:
         if user_input is not None:
-            return await self._guardar(user_input)
+            return await self._guardar(user_input, esquema_ciclo({}))
         return self.async_show_form(step_id="ciclo", data_schema=esquema_ciclo(self._valores))
 
     # ── Zonas ─────────────────────────────────────────────────────────

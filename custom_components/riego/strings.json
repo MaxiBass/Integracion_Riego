@@ -151,7 +151,10 @@
           "factor_lux": "Conversión de lux a W/m². 126,7 es el valor de las estaciones Ecowitt y el habitual para luz solar.",
           "sensor_presion": "La ABSOLUTA (la del emplazamiento), no la relativa reducida a nivel del mar. En Ecowitt, 'baromabsin' y no 'baromrelin'. Si lo dejas vacío se estima a partir de la altitud configurada en Home Assistant.",
           "sensor_lluvia_24h": "Solo se usa si no hay contador total, o en el primer ciclo después de configurarlo: su ventana de 24 h no coincide con el periodo entre ciclos.",
-          "sensor_lluvia_total": "Un contador que solo sube, como la lluvia total o anual de la estación. Con él la lluvia se mide exactamente entre un ciclo y el siguiente, igual que la ET₀. Recomendado."
+          "sensor_lluvia_total": "Un contador que solo sube, como la lluvia total o anual de la estación. Con él la lluvia se mide exactamente entre un ciclo y el siguiente, igual que la ET₀. Recomendado.",
+          "altura_anemometro": "Se usa para convertir la velocidad medida a la de 2 m que exige FAO-56.",
+          "factor_radiacion": "Multiplica la lectura del sensor. Bájalo si tu estación supera el máximo teórico de cielo despejado (típico en sensores que derivan W/m² de un lux-metro).",
+          "viento_minimo": "FAO-56 recomienda 0,5 m/s para que el término aerodinámico no se desplome con viento muy flojo. 0 desactiva el suelo mínimo."
         }
       },
       "prevision": {
@@ -213,7 +216,9 @@
         },
         "data_description": {
           "sensor_caudal": "Con él la integración sabe si la zona está regando y, junto con el volumen, comprueba lo que de verdad se regó.",
-          "sensor_volumen_real": "Litros que cuenta la válvula en cada riego. Con el caudal, la integración comprueba lo que de verdad se regó y devuelve al déficit lo que no llegó; con la duración, aprende el caudal real de la zona."
+          "sensor_volumen_real": "Litros que cuenta la válvula en cada riego. Con el caudal, la integración comprueba lo que de verdad se regó y devuelve al déficit lo que no llegó; con la duración, aprende el caudal real de la zona.",
+          "factor": "Multiplica a ETc antes de pasar a litros. Sirve para riego localizado (solo se moja parte del suelo) y para riego deficitario controlado. 1,0 = dosis FAO-56 íntegra.",
+          "techo": "Límite absoluto por ciclo. Debe quedar POR ENCIMA del máximo legítimo en el pico de verano; si recorta de forma habitual está racionando, no protegiendo."
         }
       }
     },

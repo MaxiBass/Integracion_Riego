@@ -26,6 +26,22 @@ LAT, LON, ALT = 38.35, -0.48, 120.0
 fallos: list[str] = []
 
 
+def _modulo_suelto(nombre: str):
+    """Carga un módulo de la integración sin ejecutar su __init__.py.
+
+    El paquete importa Home Assistant y voluptuous al cargarse; et0.py y
+    const.py no, y así sus pruebas corren con un Python cualquiera.
+    """
+    import importlib.util
+
+    ruta = RAIZ / "custom_components" / "riego" / f"{nombre}.py"
+    spec = importlib.util.spec_from_file_location(f"riego_suelto_{nombre}", ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = modulo  # dataclass lo busca ahí
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
 def comprobar(condicion: bool, etiqueta: str) -> None:
     if condicion:
         print(f"  OK    {etiqueta}")
@@ -42,7 +58,7 @@ def casi(a: float, b: float, tol: float = 1e-6) -> bool:
 
 
 def test_et0() -> None:
-    from custom_components.riego import et0
+    et0 = _modulo_suelto("et0")
 
     print("\nET₀ — Penman-Monteith FAO-56 horaria")
 
@@ -124,8 +140,8 @@ def test_et0() -> None:
 
 def test_irradiancia_desde_lux() -> None:
     """Un sensor de lux debe poder sustituir al de radiación."""
-    from custom_components.riego import et0
-    from custom_components.riego.const import DEFECTO_FACTOR_LUX
+    et0 = _modulo_suelto("et0")
+    DEFECTO_FACTOR_LUX = _modulo_suelto("const").DEFECTO_FACTOR_LUX
 
     print("\nIrradiancia a partir de iluminancia")
 
@@ -308,6 +324,31 @@ def test_config_flow() -> None:
         o._zona_editada = "frutales"
         serializable(await o.async_step_editar_zona(None), "opciones editar zona")
 
+        # Vaciar un sensor opcional en Configurar lo quita. Home Assistant no
+        # manda la clave de un campo opcional vacío, y hasta v0.6.0 se
+        # conservaba el sensor anterior: era imposible quitar el viento, la
+        # presión, la lluvia, la previsión o la notificación (§7.29).
+        entrada.data = {**meteo, **prev, **ciclo, "zonas": zonas,
+                        "sensor_viento": "sensor.v", "sensor_presion": "sensor.p",
+                        "weather_entity": "weather.aemet", "notify_entity": "notify.x"}
+        entrada.options = {"sensor_lluvia_total": "sensor.lt"}
+        o.flow_id, o.handler, o.context = "o", "x", {"source": "options"}
+        sin_viento = {k: v for k, v in meteo.items()} | {"sensor_presion": "sensor.p"}
+        r = await o.async_step_meteo(sin_viento)
+        datos = r["data"]
+        comprobar(datos.get("sensor_viento", "falta") is None
+                  and datos.get("sensor_lluvia_total", "falta") is None,
+                  "al vaciar el viento y el contador de lluvia se guardan como None")
+        comprobar(datos.get("sensor_presion") == "sensor.p" and datos.get("sensor_temperatura") == "sensor.t",
+                  "los campos que vienen se guardan tal cual")
+        efectivas = {**entrada.data, **datos}
+        comprobar(efectivas["sensor_viento"] is None, "y tapan el valor del alta, que vive en entry.data")
+        r = await o.async_step_prevision(prev)
+        comprobar(r["data"].get("weather_entity", "falta") is None, "se puede quitar la previsión")
+        r = await o.async_step_ciclo({k: v for k, v in ciclo.items() if k != "simulacion"})
+        comprobar(r["data"].get("notify_entity", "falta") is None, "se puede quitar la notificación")
+        comprobar("simulacion" not in r["data"], "el paso de ciclo no toca la simulación")
+
     asyncio.run(recorrido())
 
 
@@ -364,6 +405,23 @@ def test_traducciones() -> None:
                 if campo["name"] not in etiquetas:
                     sin_texto.append(f"{seccion}.{paso}.{campo['name']}")
         comprobar(not sin_texto, f"{nombre}: todos los campos tienen etiqueta (faltan {sin_texto})")
+
+    # Las tres tienen exactamente las mismas claves: strings.json manda.
+    def claves(d, prefijo=""):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                yield from claves(v, f"{prefijo}{k}.")
+            else:
+                yield f"{prefijo}{k}"
+
+    referencia = set(claves(cargados["strings.json"]))
+    for nombre, d in cargados.items():
+        propias = set(claves(d))
+        comprobar(propias == referencia,
+                  f"{nombre}: mismas claves que strings.json (faltan {sorted(referencia - propias)}, "
+                  f"sobran {sorted(propias - referencia)})")
+    comprobar(cargados["strings.json"] == cargados["translations/es.json"],
+              "es.json es copia exacta de strings.json")
 
     for nombre, d in cargados.items():
         otra = d["config"]["step"]["otra"]
@@ -484,6 +542,12 @@ def _coordinador() -> None:
             "notify_entity": "notify.prueba", **extra,
         }
         entrada.options = {}
+
+        def tarea(_hass, coro, nombre=None, eager_start=True):
+            return asyncio.get_running_loop().create_task(coro)
+
+        entrada.async_create_background_task = tarea
+        entrada.async_create_task = tarea
 
         with patch.object(mod, "async_track_time_interval"), \
              patch.object(mod, "async_track_state_change_event"), \
@@ -685,7 +749,12 @@ def _coordinador() -> None:
     with patch.object(mod, "async_track_point_in_utc_time") as programar:
         RiegoCoordinator._programar_comprobacion(c, "frutales", mod.dt_util.utcnow())
     c._comprobar_entrega = AsyncMock()
-    hass.async_create_task = MagicMock(side_effect=lambda coro: asyncio.run(coro))
+
+    def ejecutar_ya(_hass, coro, nombre=None):
+        asyncio.run(coro)
+        return SimpleNamespace(done=lambda: True)
+
+    c.entry.async_create_background_task = ejecutar_ya
     programar.call_args.args[1](None)
     comprobar(c._comprobar_entrega.await_count == 1, "al llegar la hora se comprueba la entrega")
 
@@ -819,6 +888,7 @@ def _coordinador() -> None:
 
     def con_prevision(respuesta, **extra):
         c, hass = construir(weather_entity="weather.aemet", **extra)
+        hass.states.set("weather.aemet", "rainy")
         hass.services.async_call = AsyncMock(
             side_effect=lambda *a, **k: respuesta if a[:2] == ("weather", "get_forecasts") else None
         )
@@ -975,6 +1045,211 @@ def _coordinador() -> None:
     comprobar(c._proximo is not None,
               "un ciclo manual no cancela el ciclo programado del amanecer")
 
+    # 10. Recargar la entrada con un ciclo en curso (§7.29). Hasta v0.6.0 el
+    # ciclo viejo seguía vivo tras la recarga: publicaba en MQTT y guardaba en
+    # el mismo almacén que el coordinador nuevo.
+    async def recargar_durmiendo():
+        c, hass = construir(desfase_zonas=60)
+        c._estado["et0_acumulada"] = 3.10
+        c._planificar = MagicMock()
+        dormido = asyncio.Event()
+
+        async def dormir(_segundos):
+            dormido.set()
+            await asyncio.sleep(3600)
+
+        c._dormir = dormir
+        publicados.clear()
+        with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
+            disparo = asyncio.create_task(c._disparar_ciclo(None))
+            await asyncio.wait_for(dormido.wait(), 5)
+            await asyncio.wait_for(c.async_parar(), 5)
+            await asyncio.wait_for(disparo, 5)
+            despues = await c.ejecutar_ciclo()
+        return c, despues
+
+    c, despues = asyncio.run(recargar_durmiendo())
+    comprobar([t for t, _ in publicados] == ["z2m/Frutales/set"],
+              f"al recargar entre zonas no se publica nada más: {[t for t, _ in publicados]}")
+    comprobar(c._tarea_ciclo is None and not c._ciclo_en_curso, "la tarea del ciclo ha terminado")
+    guardado = c._store.async_save.call_args.args[0]
+    comprobar(casi(guardado["zonas"]["frutales"]["deficit"], 0.0, 0.01)
+              and guardado["zonas"]["frutales"]["litros_hoy"] == 308.0
+              and "frutales" in guardado["entregas"],
+              "lo último guardado lleva Frutales regada y su entrega pendiente de comprobar")
+    comprobar(casi(guardado["zonas"]["aptenia"]["deficit"], 1.71, 0.01),
+              "Aptenia, sin regar, conserva su déficit para el coordinador nuevo")
+    comprobar(guardado.get("ultimo_ciclo_programado") is None,
+              "el amanecer no queda cumplido: si aún es de noche, el ciclo se repite y riega lo que falta")
+    comprobar(not c._planificar.called, "el coordinador parado no vuelve a planificar")
+    comprobar(despues == {"resultado": "cancelado"} and len(publicados) == 1,
+              "un coordinador parado ya no ejecuta ciclos")
+
+    # 10b. Recargar justo mientras se publica: el envío y su apunte terminan
+    async def recargar_publicando():
+        c, hass = construir()
+        c._estado["et0_acumulada"] = 3.10
+        en_envio, soltar = asyncio.Event(), asyncio.Event()
+
+        async def publicar_lento(hass_, topic, payload, **kw):
+            en_envio.set()
+            await soltar.wait()
+            publicados.append((topic, json.loads(payload)))
+
+        publicados.clear()
+        with patch.object(mod.mqtt, "async_publish", side_effect=publicar_lento):
+            ciclo = asyncio.create_task(c.ejecutar_ciclo())
+            await asyncio.wait_for(en_envio.wait(), 5)
+            parar = asyncio.create_task(c.async_parar())
+            await asyncio.sleep(0.05)
+            esperando = not parar.done()
+            soltar.set()
+            await asyncio.wait_for(parar, 5)
+            resultado = await asyncio.wait_for(ciclo, 5)
+        return c, esperando, resultado
+
+    c, esperando, resultado = asyncio.run(recargar_publicando())
+    comprobar(esperando, "async_parar espera a que termine el envío que estaba saliendo")
+    comprobar(resultado["resultado"] == "cancelado", "quien lanzó el ciclo recibe «cancelado»")
+    comprobar(len(publicados) == 1 and casi(c.deficit("frutales"), 0.0, 0.01)
+              and "frutales" in c._estado["entregas"],
+              "la orden que salió queda apuntada: déficit descontado y entrega pendiente")
+    comprobar(c.deficit("aptenia") > 1.0, "la zona siguiente no se riega ni se descuenta")
+
+    # 11. Si MQTT falla, esa zona conserva el déficit y el ciclo sigue
+    from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+
+    async def publish_falla_frutales(hass_, topic, payload, **kw):
+        if "Frutales" in topic:
+            raise HomeAssistantError("MQTT no conectado")
+        publicados.append((topic, json.loads(payload)))
+
+    c, hass = construir()
+    c._estado["et0_acumulada"] = 3.10
+    publicados.clear()
+    with patch.object(mod.mqtt, "async_publish", side_effect=publish_falla_frutales):
+        r = asyncio.run(c.ejecutar_ciclo())
+    comprobar(r["zonas"]["frutales"]["resultado"] == "error_envio"
+              and casi(c.deficit("frutales"), 2.2, 0.01)
+              and "frutales" not in c._estado["entregas"],
+              "si no se puede publicar, Frutales conserva los 2.2 mm y no queda entrega pendiente")
+    comprobar([t for t, _ in publicados] == ["z2m/Aptenia/set"], "la zona siguiente se riega igual")
+    comprobar(any("no se pudo enviar" in a for a in avisos_de(hass)), "se avisa del envío fallido")
+
+    # 12. Riego anterior aún abierto al empezar un ciclo: se cierra con lo que
+    # lleve antes de que la orden nueva ponga a 0 el volumen de la válvula.
+    c, hass = regar_frutales()
+    c._estado["entregas"]["frutales"]["caudal_visto"] = True
+    hass.states.set("sensor.f_caudal", 280.0)
+    hass.states.set("sensor.f_volumen", 200)
+    c._estado["et0_acumulada"] = 3.10
+    publicados.clear()
+    with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
+        asyncio.run(c.ejecutar_ciclo())
+    rt = c.runtime("frutales")
+    comprobar(rt["litros_temporada"] == 200.0,
+              f"los 200 L que ya había dado suman a la temporada ({rt['litros_temporada']})")
+    comprobar(c._estado["entregas"]["frutales"]["prorrogas"] == 0,
+              "la entrega pendiente es la nueva, no la anterior prorrogada")
+    comprobar(casi(c.deficit("frutales"), 108 / 140, 0.01),
+              f"los 108 L que no llegó a dar vuelven al déficit ({c.deficit('frutales')} mm)")
+
+    # 13. Previsión no disponible: aviso de una línea, sin llamar al servicio
+    c, hass = construir(weather_entity="weather.aemet")
+    hass.states.set("weather.aemet", "unavailable")
+    c._estado["et0_acumulada"] = 3.10
+    with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish), \
+         patch.object(mod._LOGGER, "warning") as aviso:
+        r = asyncio.run(c.ejecutar_ciclo())
+    llamadas = [ll.args[:2] for ll in hass.services.async_call.call_args_list]
+    comprobar(("weather", "get_forecasts") not in llamadas and r["resultado"] == "completado",
+              "con la previsión en unavailable no se consulta y se riega igual")
+    comprobar(any("no está disponible" in ll.args[0] and "exc_info" not in ll.kwargs
+                  for ll in aviso.call_args_list),
+              "el aviso es de una línea, sin traza")
+
+    # 14. Unidades leídas de unit_of_measurement
+    def et0_con(**sensores):
+        c, hass = construir(sensor_viento="sensor.v", sensor_presion="sensor.p")
+        hass.states.set("sensor.rad", 325.15)
+        for eid, (valor, unidad) in sensores.items():
+            hass.states.set(eid, valor, {"unit_of_measurement": unidad} if unidad else {})
+        return c, c._et0_instantanea()
+
+    base = et0_con(**{"sensor.v": (3.6, "km/h"), "sensor.p": (1003.4, "hPa")})[1].et0
+    for etiqueta, sensores in (
+        ("viento en m/s", {"sensor.v": (1.0, "m/s"), "sensor.p": (1003.4, "hPa")}),
+        ("viento sin unidad (km/h, como siempre)", {"sensor.v": (3.6, None), "sensor.p": (1003.4, "hPa")}),
+        ("presión en kPa", {"sensor.v": (3.6, "km/h"), "sensor.p": (100.34, "kPa")}),
+        ("presión en inHg", {"sensor.v": (3.6, "km/h"), "sensor.p": (29.6302, "inHg")}),
+        ("temperatura en °F", {"sensor.v": (3.6, "km/h"), "sensor.p": (1003.4, "hPa"),
+                               "sensor.temp": (71.6, "°F")}),
+    ):
+        otro = et0_con(**sensores)[1].et0
+        comprobar(casi(base, otro, 1e-4), f"{etiqueta}: misma ET₀ ({otro:.5f} vs {base:.5f})")
+
+    # Viento caído: como sin anemómetro, y el aviso sale una vez, no cada minuto
+    c, hass = construir(sensor_presion="sensor.p")
+    hass.states.set("sensor.rad", 325.15)
+    hass.states.set("sensor.p", 1003.4, {"unit_of_measurement": "hPa"})
+    sin_sensor = c._et0_instantanea().et0
+    c.entry.data["sensor_viento"] = "sensor.v"
+    hass.states.set("sensor.v", "unavailable", {"unit_of_measurement": "km/h"})
+    with patch.object(mod._LOGGER, "warning") as aviso:
+        caido = [c._et0_instantanea().et0 for _ in range(3)][-1]
+    comprobar(casi(caido, sin_sensor, 1e-4), "con el viento en unavailable se calcula como sin anemómetro")
+    comprobar(aviso.call_count == 1, f"y se avisa una sola vez ({aviso.call_count})")
+    c, _ = et0_con(**{"sensor.v": (5, "furlongs/fortnight"), "sensor.p": (1003.4, "hPa")})
+    comprobar(c._et0_instantanea() is not None, "una unidad desconocida no tumba el cálculo")
+
+    # 15. Huecos de más de 3 h: se descartan y se avisa
+    c, hass = construir()
+    hass.states.set("sensor.rad", 325.15)
+    c._estado["et0_previa"] = 0.2
+    c._estado["ultima_integracion"] = (mod.dt_util.utcnow() - timedelta(hours=5)).isoformat()
+    with patch.object(mod._LOGGER, "warning") as aviso:
+        c._integrar_et0()
+    comprobar(c._estado["et0_acumulada"] == 0.0 and aviso.called,
+              "un hueco de 5 h no se integra y queda un aviso en el registro")
+
+    # 16. El tick guarda en diferido; los hitos del ciclo, en el acto
+    c, hass = construir()
+    asyncio.run(c._tick(None))
+    comprobar(c._store.async_delay_save.called and not c._store.async_save.called,
+              "el tick de cada minuto no escribe en disco en el acto")
+
+    # 17. Dos ciclos el mismo día con el sensor de 24 h: la lluvia se resta una vez
+    c, hass = construir()
+    hass.states.set("sensor.lluvia", 5.59)
+    c._estado["et0_acumulada"] = 3.10
+    with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish):
+        primero = asyncio.run(c.ejecutar_ciclo())
+        c._estado["et0_acumulada"] = 3.10
+        segundo = asyncio.run(c.ejecutar_ciclo())
+    comprobar(primero["lluvia_efectiva"] == 5.59 and segundo["lluvia_efectiva"] == 0.0,
+              f"el segundo ciclo no vuelve a restar la misma lluvia "
+              f"({primero['lluvia_efectiva']} y {segundo['lluvia_efectiva']} mm)")
+    hass.states.set("sensor.lluvia", 8.59)
+    comprobar(c._lluvia_periodo() == (3.0, "24 h"), "sí cuenta lo que llueve después del ciclo")
+
+    # 18. Zonas borradas: su estado sale del almacén al arrancar
+    c, hass = construir()
+    c.runtime("cipreses").update({"deficit": 3.0, "litros_temporada": 900.0})
+    c._estado["entregas"]["cipreses"] = {"pedidos": 100.0}
+    comprobar(c._olvidar_zonas_borradas() and "cipreses" not in c._estado["zonas"]
+              and "cipreses" not in c._estado["entregas"],
+              "el déficit, los litros y la entrega de una zona borrada se olvidan")
+    comprobar(set(c._estado["zonas"]) == {"frutales", "aptenia"}, "las demás zonas siguen")
+
+    # 19. Errores de servicio que ve el usuario: ServiceValidationError
+    c, hass = construir()
+    try:
+        asyncio.run(c.regar_zona("no_existe", 10))
+        lanzado = None
+    except Exception as err:  # noqa: BLE001
+        lanzado = err
+    comprobar(isinstance(lanzado, ServiceValidationError), f"zona desconocida → ServiceValidationError ({lanzado!r})")
+
     # 9. Volumen 0 si la zona está deshabilitada o no llega al umbral
     c, hass = construir()
     c.runtime("frutales")["deficit"] = 0.3
@@ -1015,15 +1290,86 @@ def test_entidades_retiradas() -> None:
     comprobar("number" not in [p.value for p in integracion.PLATFORMS], "la plataforma number ya no se carga")
 
 
+def test_arranque() -> None:
+    """Servicios, runtime_data, una sola entrada y limpieza de zonas borradas."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    import custom_components.riego as integracion
+    from homeassistant.exceptions import ServiceValidationError
+
+    print("\nArranque y servicios")
+    raiz = RAIZ / "custom_components" / "riego"
+    manifest = json.loads((raiz / "manifest.json").read_text())
+    comprobar(manifest.get("single_config_entry") is True and manifest.get("iot_class") == "local_push",
+              "manifest: una sola entrada e iot_class local_push")
+    hacs = json.loads((RAIZ / "hacs.json").read_text())
+    comprobar(hacs.get("homeassistant") == "2026.9.0", "hacs.json pide HA 2026.9.0 (via_device_id)")
+    comprobar("async_setup" in vars(integracion), "los servicios se registran en async_setup")
+
+    hass = MagicMock()
+    asyncio.run(integracion.async_setup(hass, {}))
+    registrados = sorted(ll.args[1] for ll in hass.services.async_register.call_args_list)
+    comprobar(registrados == sorted([integracion.SERVICIO_EJECUTAR, integracion.SERVICIO_REGAR,
+                                     integracion.SERVICIO_DEFICIT, integracion.SERVICIO_SALTAR,
+                                     integracion.SERVICIO_TEMPORADA]),
+              f"async_setup registra los cinco servicios: {registrados}")
+
+    hass.config_entries.async_loaded_entries = MagicMock(return_value=[])
+    try:
+        integracion._coordinador(hass)
+        error = None
+    except Exception as err:  # noqa: BLE001
+        error = err
+    comprobar(isinstance(error, ServiceValidationError), "sin entrada cargada, ServiceValidationError")
+    coordinador = SimpleNamespace(zonas=[{"id": "frutales", "nombre": "Frutales"}])
+    hass.config_entries.async_loaded_entries = MagicMock(
+        return_value=[SimpleNamespace(runtime_data=coordinador)])
+    comprobar(integracion._coordinador(hass) is coordinador, "el coordinador sale de entry.runtime_data")
+    comprobar(integracion._resolver_zona(coordinador, " frutales ") == "frutales", "zona por nombre")
+    try:
+        integracion._resolver_zona(coordinador, "cipreses")
+        error = None
+    except Exception as err:  # noqa: BLE001
+        error = err
+    comprobar(isinstance(error, ServiceValidationError), "zona desconocida → ServiceValidationError")
+    try:
+        integracion.ESQUEMA_DEFICIT({"zona": "x", "valor": 60})
+        acepta = True
+    except Exception:  # noqa: BLE001
+        acepta = False
+    comprobar(not acepta, "ajustar_deficit rechaza 60 mm, como el selector de services.yaml (±50)")
+
+    # Al borrar una zona en Configurar, su dispositivo y sus entidades se van
+    entrada = SimpleNamespace(entry_id="x", data={"zonas": [{"id": "frutales"}]}, options={})
+    dispositivos = [
+        SimpleNamespace(id="d1", name="Balance Hídrico", identifiers={("riego", "sistema")}),
+        SimpleNamespace(id="d2", name="Zona Frutales", identifiers={("riego", "zona_frutales")}),
+        SimpleNamespace(id="d3", name="Zona Cipreses", identifiers={("riego", "zona_cipreses")}),
+    ]
+    reg_disp, reg_ent = MagicMock(), MagicMock()
+    with patch.object(integracion.dr, "async_get", return_value=reg_disp), \
+         patch.object(integracion.dr, "async_entries_for_config_entry", return_value=dispositivos), \
+         patch.object(integracion.er, "async_get", return_value=reg_ent), \
+         patch.object(integracion.er, "async_entries_for_device",
+                      side_effect=lambda r, did, **k: [SimpleNamespace(entity_id=f"sensor.{did}")]):
+        integracion._borrar_zonas_eliminadas(MagicMock(), entrada)
+    comprobar([ll.args[0] for ll in reg_disp.async_remove_device.call_args_list] == ["d3"],
+              "solo se retira el dispositivo de la zona borrada")
+    comprobar([ll.args[0] for ll in reg_ent.async_remove.call_args_list] == ["sensor.d3"],
+              "y sus entidades")
+
+
 if __name__ == "__main__":
     test_et0()
     test_irradiancia_desde_lux()
-    test_traducciones()
     test_icono()
     try:
+        test_traducciones()
         test_config_flow()
         test_coordinador()
         test_entidades_retiradas()
+        test_arranque()
     except ImportError as err:
         print(f"\n  (saltadas las pruebas que necesitan Home Assistant: {err})")
 

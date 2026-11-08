@@ -116,7 +116,8 @@ Frutales, 24 h después de un riego). Ver §4.3.
 1. Editar los archivos **en el repo**, dentro de `custom_components/riego/`.
 2. Commit en el repo. Push: Maxi, o Claude Code con `gh` si se lo pide.
 3. Subir el número de `version` en `manifest.json` cuando el cambio esté
-   listo para probarse — HACS detecta la actualización por ese número.
+   listo para probarse. HACS no lo usa para detectar la actualización (sigue
+   commits, ver «Entorno»), pero es lo que dice qué versión hay instalada.
 4. Se actualiza desde HACS (o con `update.install`, ver arriba) y se
    reinicia HA para probar.
 5. Si algo falla, se corrige, se sube la versión otra vez, commit, push,
@@ -133,7 +134,7 @@ porque no había forma de verificarlo antes. Ahora sí la hay:
 
 ```bash
 python3 -m venv /tmp/hav
-/tmp/hav/bin/pip install homeassistant==2026.9.2 paho-mqtt
+/tmp/hav/bin/pip install homeassistant==2026.11.0 paho-mqtt pillow
 /tmp/hav/bin/python tests/test_riego.py
 node tests/test_estrategia.mjs
 ```

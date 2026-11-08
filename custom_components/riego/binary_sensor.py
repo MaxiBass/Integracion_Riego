@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, Z_ID, Z_NOMBRE
+from .const import Z_ID, Z_NOMBRE
 from .coordinator import RiegoCoordinator
 from .entity import EntidadSistema, EntidadZona
 
@@ -18,7 +18,7 @@ from .entity import EntidadSistema, EntidadZona
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    coordinador: RiegoCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinador: RiegoCoordinator = entry.runtime_data
     entidades: list[BinarySensorEntity] = [AplazadoPorLluvia(coordinador)]
     for zona in coordinador.zonas:
         entidades.append(ZonaRegando(coordinador, zona[Z_ID], zona.get(Z_NOMBRE, zona[Z_ID])))

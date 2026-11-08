@@ -10,7 +10,9 @@ from typing import Any
 
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfPressure, UnitOfSpeed, UnitOfTemperature
 from homeassistant.core import HomeAssistant, State, callback
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
     async_track_state_change_event,
@@ -20,6 +22,11 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.sun import get_astral_event_next
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import (
+    PressureConverter,
+    SpeedConverter,
+    TemperatureConverter,
+)
 
 from . import et0 as et0_mod
 from .const import (
@@ -127,7 +134,11 @@ ETIQUETAS = {
     "saltado": "saltado a petición",
     "completado": "completado",
     "ya_en_curso": "ya en curso",
+    "error_envio": "no se pudo enviar la orden",
+    "cancelado": "interrumpido",
 }
+
+NO_DISPONIBLE = ("unknown", "unavailable", "", None)
 
 
 def _sin_marcas(texto: str) -> str:
@@ -147,6 +158,13 @@ VENTANA_CICLO_CUMPLIDO = timedelta(hours=18)
 # bajada menor, como ruido de lectura. Es el mismo criterio que aplica Home
 # Assistant a los sensores total_increasing.
 CAIDA_REINICIO_CONTADOR = 0.9
+# Huecos de integración de la ET₀ por encima de esto se descartan (HA parado,
+# cambio de hora): no se sabe qué tiempo hizo entre medias.
+HUECO_MAXIMO_INTEGRACION = timedelta(hours=3)
+# Retraso del guardado del almacén en el tick de cada minuto (§7.29). Los hitos
+# del ciclo y los servicios guardan en el acto; al parar HA, el almacén escribe
+# lo pendiente antes de cerrar.
+RETRASO_GUARDADO_SEGUNDOS = 300
 
 
 def _num(estado: State | None, defecto: float = 0.0) -> float:
@@ -183,6 +201,16 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cancelar_planificador = None
         self._desuscriptores: list[Any] = []
         self._ciclo_en_curso = False
+        # Tarea del ciclo en marcha y, dentro de ella, la del riego de la zona
+        # que se está enviando, que no se interrumpe (§7.29).
+        self._tarea_ciclo: asyncio.Task | None = None
+        self._tarea_zona: asyncio.Task | None = None
+        # Tareas de comprobación de entregas lanzadas por los temporizadores
+        self._tareas: set[asyncio.Task] = set()
+        # Tras async_parar no se planifica ni se programa nada más
+        self._parado = False
+        # Problemas de sensores ya avisados, para no repetir el aviso cada minuto
+        self._avisados: set[str] = set()
         self._proximo: datetime | None = None
         # Comprobaciones de entrega programadas, por zona
         self._comprobaciones: dict[str, Any] = {}
@@ -288,6 +316,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lluvia_total_previa": guardado.get("lluvia_total_previa"),
             "lluvia_total_entidad": guardado.get("lluvia_total_entidad"),
             "lluvia_total_desde": guardado.get("lluvia_total_desde"),
+            "lluvia_24h_descontada": guardado.get("lluvia_24h_descontada"),
             "aplazado_lluvia": guardado.get("aplazado_lluvia", False),
             "saltar_proximo": guardado.get("saltar_proximo", False),
             # Riegos enviados cuya entrega aún no se ha comprobado (§7.28)
@@ -298,7 +327,9 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             CONF_SIMULACION: guardado.get(CONF_SIMULACION),
         }
 
-        if self._migrar_ajustes_de_zona():
+        cambiado = self._migrar_ajustes_de_zona()
+        cambiado |= self._olvidar_zonas_borradas()
+        if cambiado:
             await self._guardar()
         for z in self.zonas:
             self.runtime(z[Z_ID]).setdefault("deficit", 0.0)
@@ -320,7 +351,29 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._planificar()
         await self.async_refresh()
 
+    def _olvidar_zonas_borradas(self) -> bool:
+        """Quita del almacén el estado de las zonas que ya no están configuradas.
+
+        Sin esto, el déficit y los litros de una zona borrada se quedaban en el
+        almacén para siempre, y reaparecían si se creaba otra con el mismo nombre.
+        """
+        vigentes = {z[Z_ID] for z in self.zonas}
+        borradas = [zid for zid in self._estado["zonas"] if zid not in vigentes]
+        for zid in borradas:
+            del self._estado["zonas"][zid]
+            self._estado["entregas"].pop(zid, None)
+        if borradas:
+            _LOGGER.info("Se olvida el estado de las zonas borradas: %s", ", ".join(borradas))
+        return bool(borradas)
+
     async def async_parar(self) -> None:
+        """Para todo antes de descargar la entrada (también al recargarla).
+
+        El ciclo en curso se cancela y se espera a que termine: si siguiera
+        vivo, publicaría en MQTT y guardaría en el mismo almacén que el
+        coordinador nuevo de la recarga (§7.29).
+        """
+        self._parado = True
         for cancelar in self._desuscriptores:
             cancelar()
         self._desuscriptores.clear()
@@ -332,10 +385,48 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._comprobaciones.clear()
         self._cancelar_ciclo = None
         self._cancelar_planificador = None
+
+        pendientes = [t for t in (self._tarea_ciclo, *self._tareas) if t and not t.done()]
+        for tarea in pendientes:
+            tarea.cancel()
+        # La zona que se estaba enviando termina su envío y su apunte.
+        if self._tarea_zona and not self._tarea_zona.done():
+            pendientes.append(self._tarea_zona)
+        if pendientes:
+            await asyncio.gather(*pendientes, return_exceptions=True)
+        self._ciclo_en_curso = False
         await self._guardar()
 
     async def _guardar(self) -> None:
+        """Guarda el estado en el acto. Para los hitos del ciclo y los servicios."""
         await self._store.async_save(self._estado)
+
+    @callback
+    def _guardar_diferido(self) -> None:
+        """Guarda el estado al cabo de unos minutos, para lo que cambia a menudo."""
+        self._store.async_delay_save(lambda: self._estado, RETRASO_GUARDADO_SEGUNDOS)
+
+    @callback
+    def _lanzar(self, coro, nombre: str) -> None:
+        """Lanza una tarea ligada a la entrada, que async_parar cancela."""
+        if self._parado:
+            coro.close()
+            return
+        tarea = self.entry.async_create_background_task(self.hass, coro, nombre)
+        if not tarea.done():
+            self._tareas.add(tarea)
+            tarea.add_done_callback(self._tareas.discard)
+
+    def _avisar_una_vez(self, clave: str, mensaje: str, *args: Any) -> None:
+        """WARNING la primera vez que aparece un problema de sensor."""
+        if clave not in self._avisados:
+            self._avisados.add(clave)
+            _LOGGER.warning(mensaje, *args)
+
+    def _resuelto(self, clave: str, mensaje: str, *args: Any) -> None:
+        if clave in self._avisados:
+            self._avisados.discard(clave)
+            _LOGGER.info(mensaje, *args)
 
     # ── ET₀: cálculo instantáneo e integración ────────────────────────
 
@@ -362,27 +453,55 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if radiacion is None:
             return None
 
+        temperatura = self._leer_con_unidad(
+            temp, TemperatureConverter, UnitOfTemperature.CELSIUS, UnitOfTemperature.CELSIUS
+        )
+        if temperatura is None:
+            return None
+
+        # Viento: sin sensor, o con el sensor caído, cuenta 0 m/s y el cálculo
+        # aplica el viento mínimo configurado.
         viento_ms = 0.0
-        if (ent := op.get(CONF_SENSOR_VIENTO)) and (estado := obtener(ent)):
-            bruto = _num(estado, 0.0)
-            unidad = estado.attributes.get("unit_of_measurement", "km/h")
-            viento_ms = bruto / 3.6 if unidad in ("km/h", "kph") else bruto
+        if ent := op.get(CONF_SENSOR_VIENTO):
+            estado_viento = obtener(ent)
+            leido = self._leer_con_unidad(
+                estado_viento,
+                SpeedConverter,
+                UnitOfSpeed.METERS_PER_SECOND,
+                # Sin unidad se mantiene lo de siempre: km/h, como Ecowitt
+                UnitOfSpeed.KILOMETERS_PER_HOUR,
+            )
+            if estado_viento is None or estado_viento.state in NO_DISPONIBLE:
+                self._avisar_una_vez(
+                    f"no_disponible:{ent}",
+                    "El sensor de viento %s no está disponible; se calcula la ET₀ "
+                    "como sin anemómetro, con el viento mínimo configurado",
+                    ent,
+                )
+            elif leido is not None:
+                self._resuelto(f"no_disponible:{ent}", "El sensor de viento %s vuelve a dar datos", ent)
+                viento_ms = max(leido, 0.0)
 
         # Presión ABSOLUTA del emplazamiento, no la reducida a nivel del mar.
         # Sin sensor se estima a partir de la altitud (FAO-56 Ec.7).
         presion = et0_mod.presion_desde_altitud(float(self.hass.config.elevation or 0))
         if (ent := op.get(CONF_SENSOR_PRESION)) and (estado := obtener(ent)):
-            if estado.state not in ("unknown", "unavailable"):
-                leida = _num(estado, presion)
-                # Se acepta tanto en hPa como en kPa
-                presion = leida * 10.0 if leida < 200 else leida
+            if estado.state not in NO_DISPONIBLE:
+                if estado.attributes.get("unit_of_measurement"):
+                    leida = self._leer_con_unidad(estado, PressureConverter, UnitOfPressure.HPA, None)
+                else:
+                    # Sin unidad declarada se distingue kPa de hPa por la cifra.
+                    leida = _num(estado, presion)
+                    leida = leida * 10.0 if leida < 200 else leida
+                if leida is not None:
+                    presion = leida
 
         ahora = dt_util.now()
         offset = ahora.utcoffset() or timedelta(0)
         factor_rad = float(self._opt(CONF_FACTOR_RADIACION, DEFECTO_FACTOR_RADIACION))
 
         return et0_mod.calcular(
-            temperatura_c=_num(temp, 20.0),
+            temperatura_c=temperatura,
             humedad_pct=_num(hum, 50.0),
             radiacion_wm2=radiacion * factor_rad,
             viento_ms=viento_ms,
@@ -400,11 +519,41 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
         )
 
+    def _leer_con_unidad(
+        self,
+        estado: State | None,
+        conversor: Any,
+        destino: str,
+        sin_unidad: str | None,
+    ) -> float | None:
+        """Lee un sensor y lo pasa a `destino` según su unit_of_measurement.
+
+        Sin unidad declarada se supone `sin_unidad`; si eso es None, o la unidad
+        no es de las que el conversor conoce, se avisa y se devuelve None.
+        """
+        if estado is None or estado.state in NO_DISPONIBLE:
+            return None
+        try:
+            valor = float(estado.state)
+        except (TypeError, ValueError):
+            return None
+        unidad = estado.attributes.get("unit_of_measurement") or sin_unidad
+        if unidad not in conversor.VALID_UNITS:
+            self._avisar_una_vez(
+                f"unidad:{estado.entity_id}",
+                "%s está en «%s», que no es una unidad de %s conocida; no se usa",
+                estado.entity_id,
+                unidad,
+                conversor.UNIT_CLASS,
+            )
+            return None
+        return conversor.convert(valor, unidad, destino)
+
     async def _tick(self, _ahora: datetime) -> None:
         """Integra la ET₀ y la lluvia del periodo. Corre cada minuto."""
         self._integrar_lluvia()
         self._integrar_et0()
-        await self._guardar()
+        self._guardar_diferido()
         await self.async_refresh()
 
     def _integrar_et0(self) -> None:
@@ -416,11 +565,17 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ahora = dt_util.utcnow()
         anterior = self._estado.get("ultima_integracion")
         if anterior:
-            transcurrido = (ahora - dt_util.parse_datetime(anterior)).total_seconds()
+            hueco = ahora - dt_util.parse_datetime(anterior)
             # Se descartan saltos absurdos (reinicios largos, cambios de hora)
-            if 0 < transcurrido < 3600 * 3:
-                incremento = self._estado["et0_previa"] * (transcurrido / 3600.0)
+            if timedelta(0) < hueco < HUECO_MAXIMO_INTEGRACION:
+                incremento = self._estado["et0_previa"] * (hueco.total_seconds() / 3600.0)
                 self._estado["et0_acumulada"] += incremento
+            elif hueco >= HUECO_MAXIMO_INTEGRACION:
+                _LOGGER.warning(
+                    "Se descartan %.1f h de ET₀ sin integrar (Home Assistant parado o "
+                    "sensores sin datos): el déficit de este periodo saldrá por debajo",
+                    hueco.total_seconds() / 3600,
+                )
 
         self._estado["ultima_integracion"] = ahora.isoformat()
         self._estado["et0_previa"] = resultado.et0
@@ -487,7 +642,20 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if contador and (self._periodo_medido() or not sensor_24h):
             return float(self._estado.get("lluvia_acumulada") or 0.0), "contador"
         if sensor_24h:
-            return _num(self.hass.states.get(sensor_24h), 0.0), "24 h"
+            bruto = _num(self.hass.states.get(sensor_24h), 0.0)
+            # Si hubo otro ciclo hace menos de 24 h, parte de lo que marca el
+            # sensor ya se descontó en él: solo cuenta lo que haya subido desde
+            # entonces. Sin esto, dos ciclos el mismo día restaban dos veces la
+            # misma lluvia (§7.29).
+            ultimo = dt_util.parse_datetime(self._estado.get("ultimo_ciclo") or "")
+            descontada = self._estado.get("lluvia_24h_descontada")
+            if (
+                descontada is not None
+                and ultimo is not None
+                and dt_util.utcnow() - ultimo < timedelta(hours=24)
+            ):
+                bruto = max(bruto - float(descontada), 0.0)
+            return bruto, "24 h"
         return 0.0, "sin sensor"
 
     def _lluvia_efectiva(self) -> float:
@@ -510,6 +678,16 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return vacia
         tipo = self._opt(CONF_FORECAST_TIPO, FORECAST_HORARIO)
         horas = int(self._opt(CONF_FORECAST_HORAS, DEFECTO_FORECAST_HORAS))
+        estado = self.hass.states.get(entidad)
+        if estado is None or estado.state in NO_DISPONIBLE:
+            # Pasa con AEMET de vez en cuando: un aviso de una línea y se riega
+            # sin previsión, como dice §4.5.
+            _LOGGER.warning(
+                "La previsión %s no está disponible (%s); el ciclo sigue sin ella",
+                entidad,
+                estado.state if estado else "no existe",
+            )
+            return vacia
         try:
             respuesta = await self.hass.services.async_call(
                 "weather",
@@ -518,6 +696,9 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 blocking=True,
                 return_response=True,
             )
+        except HomeAssistantError as err:
+            _LOGGER.warning("No se pudo consultar la previsión de %s: %s", entidad, err)
+            return vacia
         except Exception:  # noqa: BLE001 - la previsión nunca debe tumbar el ciclo
             _LOGGER.warning("No se pudo consultar la previsión de %s", entidad, exc_info=True)
             return vacia
@@ -562,13 +743,14 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         def _al_cambiar(evento) -> None:
             zid = vigilados.get(evento.data["entity_id"])
             if zid:
-                self.hass.async_create_task(self._actualizar_caudal(zid))
+                self._actualizar_caudal(zid)
 
         self._desuscriptores.append(
             async_track_state_change_event(self.hass, list(vigilados), _al_cambiar)
         )
 
-    async def _actualizar_caudal(self, zid: str) -> None:
+    @callback
+    def _actualizar_caudal(self, zid: str) -> None:
         """Deriva L/h del volumen y la duración que reporta la electroválvula."""
         cfg = self.zona(zid) or {}
         ent_vol, ent_dur = cfg.get(Z_SENSOR_VOLUMEN), cfg.get(Z_SENSOR_DURACION)
@@ -584,7 +766,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         previo = self.runtime(zid).get("caudal")
         nuevo = muestra if previo is None else (1 - EMA_ALFA) * previo + EMA_ALFA * muestra
         self.runtime(zid)["caudal"] = round(nuevo, 1)
-        await self._guardar()
+        self._guardar_diferido()
 
     # ── Cálculo de volúmenes ──────────────────────────────────────────
 
@@ -683,6 +865,8 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @callback
     def _planificar(self) -> None:
         """Programa el planificador y, si procede, el ciclo de esta noche."""
+        if self._parado:
+            return
         if self._cancelar_planificador:
             self._cancelar_planificador()
             self._cancelar_planificador = None
@@ -741,8 +925,9 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             await self.ejecutar_ciclo(programado=True)
         finally:
-            self._planificar()
-            await self.async_refresh()
+            if not self._parado:
+                self._planificar()
+                await self.async_refresh()
 
     # ── Ejecución del ciclo ───────────────────────────────────────────
 
@@ -755,21 +940,47 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         lanza a mano con el servicio. Solo el primero marca el amanecer como
         cumplido: si un ciclo manual lo marcara, el ciclo real de esa
         madrugada se saltaría sin avisar.
+
+        El ciclo corre en su propia tarea, ligada a la entrada, para que
+        async_parar pueda cancelarlo al recargar (§7.29). Quien lo lanza solo
+        espera el resultado: si lo cancelan a él, el ciclo sigue.
         """
+        if self._parado:
+            return {"resultado": "cancelado"}
         if self._ciclo_en_curso:
             _LOGGER.warning("Ciclo de riego ya en curso; se ignora la nueva ejecución")
             return {"resultado": "ya_en_curso"}
         self._ciclo_en_curso = True
+        tarea = self.entry.async_create_background_task(
+            self.hass, self._ciclo_en_tarea(forzar_simulacion, programado), "riego_ciclo"
+        )
+        self._tarea_ciclo = tarea
+        try:
+            return await asyncio.shield(tarea)
+        except asyncio.CancelledError:
+            if tarea.cancelled():
+                return {"resultado": "cancelado"}
+            raise
+
+    async def _ciclo_en_tarea(
+        self, forzar_simulacion: bool | None, programado: bool
+    ) -> dict[str, Any]:
         try:
             return await self._ejecutar_ciclo(forzar_simulacion, programado)
+        except asyncio.CancelledError:
+            _LOGGER.warning("Ciclo de riego interrumpido por una recarga o parada de Home Assistant")
+            # Al recargar, async_parar guarda en el acto; al parar HA, el
+            # almacén escribe lo pendiente antes de cerrar.
+            self._guardar_diferido()
+            raise
         finally:
             self._ciclo_en_curso = False
+            self._tarea_ciclo = None
 
     async def _ejecutar_ciclo(
         self, forzar_simulacion: bool | None = None, programado: bool = False
     ) -> dict[str, Any]:
         simulacion = self.simulacion if forzar_simulacion is None else forzar_simulacion
-        op = self.opciones
         resumen: dict[str, Any] = {"simulacion": simulacion, "zonas": {}}
 
         # 0. Si quedó algún riego sin comprobar, se comprueba ahora: lo que no
@@ -777,7 +988,39 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for zid in list(self._estado["entregas"]):
             await self._comprobar_entrega(zid)
 
-        # 1. ET₀ del periodo y lluvia efectiva
+        # 1. ET₀ y lluvia del periodo al déficit de cada zona
+        marca_previa = self._estado.get("ultimo_ciclo_programado")
+        await self._aplicar_balance(resumen, programado)
+
+        # 2-4. Salto a petición, helada o lluvia prevista: no se riega
+        if motivo := await self._motivo_para_no_regar(resumen, programado):
+            resumen["resultado"] = motivo
+            self._emitir("ciclo_omitido", resumen)
+            await self.async_refresh()
+            return resumen
+
+        # 5. Riego zona a zona, con desfase fijo entre ellas
+        await self._regar_zonas(resumen, simulacion, programado, marca_previa)
+        resumen.setdefault("resultado", "simulado" if simulacion else "completado")
+        self._emitir("ciclo_completado", resumen)
+
+        if simulacion:
+            lineas = [
+                f"· {(self.zona(z) or {}).get(Z_NOMBRE, z)}: {d['litros']} L "
+                f"({ETIQUETAS.get(d['resultado'], d['resultado'])})"
+                for z, d in resumen["zonas"].items()
+            ]
+            await self._avisar(
+                "🧪 SIMULACIÓN de riego (no se ha enviado nada a las válvulas)\n"
+                f"ET₀ del periodo: {resumen['et0_periodo']} mm · "
+                f"lluvia efectiva: {resumen['lluvia_efectiva']} mm\n" + "\n".join(lineas)
+            )
+
+        await self.async_refresh()
+        return resumen
+
+    async def _aplicar_balance(self, resumen: dict[str, Any], programado: bool) -> None:
+        """Suma la ET₀ del periodo y resta la lluvia en el déficit de cada zona."""
         self._integrar_lluvia()  # la lluvia hasta este mismo minuto
         et0_periodo = float(self._estado["et0_acumulada"])
         lluvia_bruta, fuente_lluvia = self._lluvia_periodo()
@@ -791,6 +1034,14 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.runtime(zid)["deficit"] = round(min(max(nuevo, 0.0), maximo), 2)
             self.runtime(zid)["litros_hoy"] = 0.0
 
+        # Lo que marca el sensor de 24 h ya está descontado: un segundo ciclo
+        # antes de 24 h solo restará lo que suba desde ahora.
+        sensor_24h = self.opciones.get(CONF_SENSOR_LLUVIA)
+        self._estado["lluvia_24h_descontada"] = (
+            _num(self.hass.states.get(sensor_24h), 0.0)
+            if fuente_lluvia == "24 h" and sensor_24h
+            else None
+        )
         self._estado["et0_periodo_anterior"] = round(et0_periodo, 2)
         self._estado["et0_acumulada"] = 0.0
         self._estado["lluvia_acumulada"] = 0.0
@@ -804,9 +1055,12 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         resumen["lluvia_medida"] = round(lluvia_bruta, 2)
         resumen["fuente_lluvia"] = fuente_lluvia
 
-        # 2. Riego saltado a petición — el déficit se conserva. Solo cuenta el
-        # ciclo programado: uno lanzado a mano es una orden explícita de regar
-        # y deja el salto pendiente para el programado.
+    async def _motivo_para_no_regar(
+        self, resumen: dict[str, Any], programado: bool
+    ) -> str | None:
+        """Salto a petición, helada o lluvia prevista. El déficit se conserva."""
+        # Riego saltado a petición. Solo cuenta el ciclo programado: uno lanzado
+        # a mano es una orden explícita de regar y deja el salto pendiente.
         if programado and self._estado.get("saltar_proximo"):
             self._estado["saltar_proximo"] = False
             await self._guardar()
@@ -814,27 +1068,21 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "⏭️ Riego saltado a petición. "
                 "Los déficits se conservan para el próximo ciclo."
             )
-            resumen["resultado"] = "saltado"
-            self._emitir("ciclo_omitido", resumen)
-            await self.async_refresh()
-            return resumen
+            return "saltado"
 
-        # 3. Protección por helada — el déficit se conserva
-        temp = _num(self.hass.states.get(op[CONF_SENSOR_TEMP]), 99.0)
+        # Protección por helada
+        temp = self._temperatura_c()
         umbral_helada = float(self._opt(CONF_TEMP_HELADA, DEFECTO_TEMP_HELADA))
-        if temp < umbral_helada:
+        if temp is not None and temp < umbral_helada:
             await self._avisar(
-                f"❄️ Riego pospuesto por helada. Temperatura {temp} °C. "
+                f"❄️ Riego pospuesto por helada. Temperatura {temp:g} °C. "
                 "Los déficits se conservan para el próximo ciclo."
             )
-            resumen["resultado"] = "helada"
-            self._emitir("ciclo_omitido", resumen)
-            await self.async_refresh()
-            return resumen
+            return "helada"
 
-        # 4. Aplazamiento por lluvia prevista, como máximo un día. Aplaza
-        # tanto la cantidad prevista como la probabilidad sostenida: con AEMET
-        # la cantidad casi nunca llega al umbral aunque luego llueva.
+        # Aplazamiento por lluvia prevista, como máximo un día. Aplaza tanto la
+        # cantidad prevista como la probabilidad sostenida: con AEMET la
+        # cantidad casi nunca llega al umbral aunque luego llueva.
         prevista = await self._lluvia_prevista()
         resumen["lluvia_prevista"] = prevista["mm"]
         resumen["horas_lluvia_probable"] = prevista["horas_probables"]
@@ -859,67 +1107,120 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"🌧 Riego aplazado 24 h: {motivo}. "
                 "Los déficits se conservan; si no llueve, mañana se riega."
             )
-            resumen["resultado"] = "aplazado_lluvia"
-            self._emitir("ciclo_omitido", resumen)
-            await self.async_refresh()
-            return resumen
+            return "aplazado_lluvia"
 
         self._estado["aplazado_lluvia"] = False
         await self._guardar()
+        return None
 
-        # 5. Riego zona a zona, con desfase fijo entre ellas
+    def _temperatura_c(self) -> float | None:
+        return self._leer_con_unidad(
+            self.hass.states.get(self.opciones[CONF_SENSOR_TEMP]),
+            TemperatureConverter,
+            UnitOfTemperature.CELSIUS,
+            UnitOfTemperature.CELSIUS,
+        )
+
+    async def _regar_zonas(
+        self,
+        resumen: dict[str, Any],
+        simulacion: bool,
+        programado: bool,
+        marca_previa: str | None,
+    ) -> None:
+        """Riega zona a zona. Una zona empezada se termina aunque cancelen el ciclo."""
         desfase = int(self._opt(CONF_DESFASE_ZONAS, DEFECTO_DESFASE_ZONAS))
         primera = True
-        for z in self.zonas:
-            zid = z[Z_ID]
-            litros = self.volumen_objetivo(zid)
-            detalle = {"litros": litros, "deficit_previo": self.deficit(zid)}
+        en_curso: str | None = None
+        try:
+            for z in self.zonas:
+                zid = z[Z_ID]
+                litros = self.volumen_objetivo(zid)
+                if litros <= 0:
+                    resumen["zonas"][zid] = {
+                        "litros": litros,
+                        "deficit_previo": self.deficit(zid),
+                        "resultado": "sin_riego",
+                    }
+                    continue
 
-            if litros <= 0:
-                detalle["resultado"] = "sin_riego"
-                resumen["zonas"][zid] = detalle
-                continue
+                if not primera and desfase > 0:
+                    await self._dormir(desfase)
+                primera = False
 
-            if not primera and desfase > 0:
-                await self._dormir(desfase)
-            primera = False
-
-            if not simulacion:
-                await self._enviar(z, litros)
-
-            m2 = float(self.valor_zona(zid, Z_M2, DEFECTO_M2))
-            rt = self.runtime(zid)
-            comprobada = not simulacion and self._registrar_entrega(
-                zid, litros, m2, rt.get("ultimo_riego")
-            )
-            rt["deficit"] = round(max(self.deficit(zid) - litros / max(m2, 1.0), 0.0), 2)
-            rt["litros_hoy"] = float(litros)
-            if not comprobada:
-                # Si se va a comprobar, se suma al terminar lo que de verdad llegó.
-                rt["litros_temporada"] = round(float(rt.get("litros_temporada", 0.0)) + litros, 1)
-            rt["ultimo_riego"] = dt_util.utcnow().isoformat()
-            detalle["resultado"] = "simulado" if simulacion else "regado"
-            detalle["deficit_posterior"] = rt["deficit"]
-            resumen["zonas"][zid] = detalle
-
-        await self._guardar()
-        resumen.setdefault("resultado", "simulado" if simulacion else "completado")
-        self._emitir("ciclo_completado", resumen)
-
-        if simulacion:
-            lineas = [
-                f"· {(self.zona(z) or {}).get(Z_NOMBRE, z)}: {d['litros']} L "
-                f"({ETIQUETAS.get(d['resultado'], d['resultado'])})"
-                for z, d in resumen["zonas"].items()
+                # El envío y su apunte van en una tarea aparte y protegida: si
+                # cancelan el ciclo justo al publicar, la orden puede haber
+                # salido ya, y entonces tiene que quedar apuntada (§7.29).
+                en_curso = zid
+                self._tarea_zona = self.entry.async_create_task(
+                    self.hass,
+                    self._regar_zona_del_ciclo(z, litros, simulacion),
+                    f"riego_zona_{zid}",
+                )
+                resumen["zonas"][zid] = await asyncio.shield(self._tarea_zona)
+                en_curso = None
+        except asyncio.CancelledError:
+            quedan = [
+                z.get(Z_NOMBRE, z[Z_ID])
+                for z in self.zonas
+                if z[Z_ID] not in resumen["zonas"]
+                and z[Z_ID] != en_curso
+                and self.volumen_objetivo(z[Z_ID]) > 0
             ]
-            await self._avisar(
-                "🧪 SIMULACIÓN de riego (no se ha enviado nada a las válvulas)\n"
-                f"ET₀ del periodo: {resumen['et0_periodo']} mm · "
-                f"lluvia efectiva: {lluvia} mm\n" + "\n".join(lineas)
-            )
+            if quedan:
+                _LOGGER.warning(
+                    "Quedan sin regar en este ciclo: %s. Su déficit se conserva",
+                    ", ".join(quedan),
+                )
+                if programado:
+                    # El amanecer no queda cumplido: si aún es de noche al volver
+                    # a arrancar, el ciclo se repite enseguida y riega lo que
+                    # falta (lo ya regado tiene el déficit a cero).
+                    self._estado["ultimo_ciclo_programado"] = marca_previa
+            raise
 
-        await self.async_refresh()
-        return resumen
+    async def _regar_zona_del_ciclo(
+        self, z: dict[str, Any], litros: int, simulacion: bool
+    ) -> dict[str, Any]:
+        """Envía la dosis de una zona y la descuenta del déficit."""
+        zid = z[Z_ID]
+        nombre = z.get(Z_NOMBRE, zid)
+        detalle: dict[str, Any] = {"litros": litros, "deficit_previo": self.deficit(zid)}
+
+        if not simulacion:
+            if zid in self._estado["entregas"]:
+                # El riego anterior aún está abierto (sigue pasando agua). La orden
+                # nueva pone el volumen de la válvula a 0, así que se cierra antes
+                # con lo que lleve: si no, sus litros no llegarían a la temporada.
+                await self._comprobar_entrega(zid, cerrar=True)
+            try:
+                enviado = await self._enviar(z, litros)
+            except HomeAssistantError as err:
+                _LOGGER.warning("No se pudo enviar el riego de %s: %s", nombre, err)
+                enviado = False
+            if not enviado:
+                detalle["resultado"] = "error_envio"
+                await self._avisar(
+                    f"⚠️ {nombre}: no se pudo enviar la orden de riego ({litros} L). "
+                    "El déficit se conserva para el próximo ciclo."
+                )
+                return detalle
+
+        m2 = float(self.valor_zona(zid, Z_M2, DEFECTO_M2))
+        rt = self.runtime(zid)
+        comprobada = not simulacion and self._registrar_entrega(
+            zid, litros, m2, rt.get("ultimo_riego")
+        )
+        rt["deficit"] = round(max(self.deficit(zid) - litros / max(m2, 1.0), 0.0), 2)
+        rt["litros_hoy"] = float(litros)
+        if not comprobada:
+            # Si se va a comprobar, se suma al terminar lo que de verdad llegó.
+            rt["litros_temporada"] = round(float(rt.get("litros_temporada", 0.0)) + litros, 1)
+        rt["ultimo_riego"] = dt_util.utcnow().isoformat()
+        await self._guardar()
+        detalle["resultado"] = "simulado" if simulacion else "regado"
+        detalle["deficit_posterior"] = rt["deficit"]
+        return detalle
 
     async def _dormir(self, segundos: int) -> None:
         await asyncio.sleep(segundos)
@@ -971,13 +1272,15 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
 
     def _programar_comprobacion(self, zid: str, cuando: datetime) -> None:
+        if self._parado:
+            return
         if cancelar := self._comprobaciones.pop(zid, None):
             cancelar()
 
         @callback
         def _disparar(_ahora: datetime) -> None:
             self._comprobaciones.pop(zid, None)
-            self.hass.async_create_task(self._comprobar_entrega(zid))
+            self._lanzar(self._comprobar_entrega(zid), f"riego_comprobar_{zid}")
 
         self._comprobaciones[zid] = async_track_point_in_utc_time(self.hass, _disparar, cuando)
 
@@ -1012,7 +1315,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if _num(nuevo, 0.0) > 0:
                 if not entrega["caudal_visto"]:
                     entrega["caudal_visto"] = True
-                    self.hass.async_create_task(self._guardar())
+                    self._guardar_diferido()
             elif entrega["caudal_visto"] and _num(evento.data.get("old_state"), 0.0) > 0:
                 # Ha dejado de pasar agua: el volumen final y el estado de la
                 # válvula llegan en el medio minuto siguiente.
@@ -1024,14 +1327,19 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             async_track_state_change_event(self.hass, list(vigilados), _al_cambiar)
         )
 
-    async def _comprobar_entrega(self, zid: str) -> None:
-        """Compara lo pedido con lo regado y devuelve al déficit lo que falte."""
+    async def _comprobar_entrega(self, zid: str, cerrar: bool = False) -> None:
+        """Compara lo pedido con lo regado y devuelve al déficit lo que falte.
+
+        Con `cerrar`, la comprobación se hace ya aunque siga pasando agua: es lo
+        que toca cuando va a salir otra orden a la misma válvula (§7.29).
+        """
         entrega = self._estado["entregas"].get(zid)
         if entrega is None:
             return
         caudal, volumen = self._sensores_entrega(zid)
         if (
-            _num(self.hass.states.get(caudal or ""), 0.0) > 0
+            not cerrar
+            and _num(self.hass.states.get(caudal or ""), 0.0) > 0
             and entrega["prorrogas"] < MAX_PRORROGAS_COMPROBACION
         ):
             # Aún pasa agua: se vuelve a mirar más tarde.
@@ -1099,17 +1407,20 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._guardar()
         await self.async_refresh()
 
-    async def _enviar(self, zona: dict[str, Any], litros: int) -> None:
+    async def _enviar(self, zona: dict[str, Any], litros: int) -> bool:
         """Publica la orden de riego volumétrico en el topic de la zona.
 
         La electroválvula ejecuta la dosis de forma autónoma: si Home Assistant
         se reinicia o Zigbee se cae a mitad de riego, la válvula termina y
         cierra sola. Por eso no se espera confirmación.
+
+        Devuelve False si la zona no tiene topic; si MQTT falla, lanza
+        HomeAssistantError.
         """
         topic = zona.get(Z_TOPIC)
         if not topic:
             _LOGGER.error("La zona %s no tiene topic MQTT configurado", zona.get(Z_NOMBRE))
-            return
+            return False
         payload = json.dumps(
             {
                 "cyclic_quantitative_irrigation": {
@@ -1121,17 +1432,24 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         await mqtt.async_publish(self.hass, topic, payload)
         _LOGGER.info("Riego %s: %s L enviados a %s", zona.get(Z_NOMBRE), litros, topic)
+        return True
 
     # ── Servicios auxiliares ──────────────────────────────────────────
 
     async def regar_zona(self, zid: str, litros: int) -> None:
         zona = self.zona(zid)
         if zona is None:
-            raise ValueError(f"Zona desconocida: {zid}")
+            raise ServiceValidationError(f"Zona desconocida: {zid}")
         if self.simulacion:
             await self._avisar(f"🧪 SIMULACIÓN: {zona.get(Z_NOMBRE)} habría recibido {litros} L")
             return
-        await self._enviar(zona, litros)
+        if zid in self._estado["entregas"]:
+            # Igual que en el ciclo: la orden nueva pone a 0 el volumen.
+            await self._comprobar_entrega(zid, cerrar=True)
+        if not await self._enviar(zona, litros):
+            raise ServiceValidationError(
+                f"La zona {zona.get(Z_NOMBRE)} no tiene topic MQTT configurado"
+            )
         rt = self.runtime(zid)
         rt["litros_hoy"] = float(rt.get("litros_hoy", 0.0)) + litros
         rt["litros_temporada"] = round(float(rt.get("litros_temporada", 0.0)) + litros, 1)

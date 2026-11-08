@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, Z_ID, Z_NOMBRE
+from .const import Z_ID, Z_NOMBRE
 from .coordinator import RiegoCoordinator
 from .entity import EntidadSistema, EntidadZona
 
@@ -27,6 +27,7 @@ class DescripcionSensor(SensorEntityDescription):
 
     valor: Callable[[dict[str, Any]], Any]
     atributos: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    reinicio: Callable[[dict[str, Any]], Any] | None = None
 
 
 SENSORES_SISTEMA: tuple[DescripcionSensor, ...] = (
@@ -44,8 +45,13 @@ SENSORES_SISTEMA: tuple[DescripcionSensor, ...] = (
         name="ET₀ acumulada del periodo",
         icon="mdi:water-minus",
         native_unit_of_measurement="mm",
-        state_class=SensorStateClass.MEASUREMENT,
+        # Un acumulado que el ciclo pone a cero: TOTAL con last_reset en el
+        # último ciclo, para que las estadísticas lo sumen bien (§7.29).
+        state_class=SensorStateClass.TOTAL,
         valor=lambda d: d.get("et0_acumulada"),
+        reinicio=lambda d: dt_util.parse_datetime(d["ultimo_ciclo"])
+        if d.get("ultimo_ciclo")
+        else None,
     ),
     DescripcionSensor(
         key="et0_periodo_anterior",
@@ -186,7 +192,7 @@ SENSORES_ZONA: tuple[DescripcionSensor, ...] = (
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    coordinador: RiegoCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinador: RiegoCoordinator = entry.runtime_data
     entidades: list[SensorEntity] = [
         SensorSistema(coordinador, d) for d in SENSORES_SISTEMA
     ]
@@ -214,6 +220,12 @@ class SensorSistema(EntidadSistema, SensorEntity):
         if self.entity_description.atributos is None:
             return None
         return self.entity_description.atributos(self.coordinator.data or {})
+
+    @property
+    def last_reset(self) -> Any:
+        if self.entity_description.reinicio is None:
+            return None
+        return self.entity_description.reinicio(self.coordinator.data or {})
 
 
 class SensorZona(EntidadZona, SensorEntity):

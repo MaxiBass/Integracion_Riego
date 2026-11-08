@@ -65,8 +65,11 @@ def radiacion_extraterrestre_horaria(
     """Ra para el periodo de una hora centrado en `momento`, en MJ/m²/h (Ec. 28).
 
     `momento` debe ser consciente de zona horaria. `offset_utc_horas` es el
-    desplazamiento del huso estándar local (p. ej. +1 para Europa/Madrid en
-    horario de invierno, +2 en verano).
+    desfase respecto a UTC de la hora de reloj de `momento`, con el horario de
+    verano incluido (en Europa/Madrid, +1 en invierno y +2 en verano). FAO-56
+    habla del huso *estándar* con la hora estándar; con horario de verano se
+    suma una hora a las dos y el ángulo horario solar sale igual. Lo que no
+    vale es mezclar la hora de verano con el desfase de invierno.
     """
     j = momento.timetuple().tm_yday
 

@@ -98,13 +98,16 @@ notificación.
 python3 tests/test_riego.py
 ```
 
-Las pruebas de ET₀ funcionan con Python a secas. Las del flujo de
-configuración y del coordinador necesitan Home Assistant instalado; si no
-lo está, se saltan avisando.
+Las pruebas de ET₀ funcionan con Python a secas: cargan `et0.py` sin pasar
+por el `__init__.py` del paquete, que importa Home Assistant. Las de las
+traducciones, el flujo de configuración y el coordinador necesitan Home
+Assistant instalado (por ejemplo en un venv con `homeassistant==2026.11.0`);
+si no lo está, se saltan avisando.
 
 ## Requisitos
 
-- Home Assistant 2024.6 o posterior.
+- Home Assistant 2026.9 o posterior (las zonas cuelgan del dispositivo del
+  sistema con `via_device_id`, que llegó en esa versión).
 - La integración **MQTT** configurada.
 - Una estación meteorológica local con, como mínimo, temperatura, humedad y
   radiación solar. Con viento y presión el cálculo es bastante mejor.

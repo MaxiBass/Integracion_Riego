@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, Z_ID, Z_NOMBRE
+from .const import Z_ID, Z_NOMBRE
 from .coordinator import RiegoCoordinator
 from .entity import EntidadSistema, EntidadZona
 
@@ -17,7 +17,7 @@ from .entity import EntidadSistema, EntidadZona
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    coordinador: RiegoCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinador: RiegoCoordinator = entry.runtime_data
     entidades: list[SwitchEntity] = [
         ModoSimulacion(coordinador),
         SaltarProximoRiego(coordinador),

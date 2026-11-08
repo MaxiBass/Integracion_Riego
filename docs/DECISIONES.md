@@ -199,6 +199,10 @@ un riego. El texto de arriba se deja como estaba para que conste el
 razonamiento; la cifra «~40 %» de su primer párrafo es la simplificación que
 §2.1 corrige (el error de γ no es un factor constante).
 
+*Superado en v0.5.0 (§7.25): `number.zona_<x>_coeficiente_de_ajuste` ya no
+existe; el coeficiente se cambia en Configurar, en la zona. La decisión de
+dejarlo en 1,0 sigue en pie.*
+
 ### 4.4 El riego manual NO descuenta del déficit
 
 Decisión explícita del usuario. Consecuencia asumida: si se riega a mano, el
@@ -219,6 +223,12 @@ aplazamiento viven en el almacén de la integración. La configuración solo
 **siembra** los valores iniciales; a partir de ahí la fuente de verdad son
 las entidades `number`/`switch`, para que ajustar un parámetro desde el panel
 no obligue a recargar la entrada de configuración.
+
+*Superado en v0.5.0 (§7.25): los ajustes (superficie, umbral, techo,
+coeficiente…) viven solo en la configuración y se cambian en Configurar, que
+recarga la entrada. En el almacén quedan el estado (déficit, litros, caudal
+aprendido, entregas pendientes) y los interruptores (simulación, zona
+habilitada, saltar el próximo riego).*
 
 ### 4.7 Panel por estrategia, no autogenerado
 
@@ -1409,3 +1419,123 @@ Fuera del repositorio se cambió lo que dependía del bloqueo. En el panel
 `riego-balance` se quitaron la línea «⛔ bloqueada» de la cabecera y los
 recuadros «Bloqueada» del Detalle. Y los textos de fuga y falta de agua de
 «Notificaciones Riego Telegram 1» ahora explican qué pasa con el riego.
+
+### 7.29 Revisión del 08/11/2026: recargas, sensores que no se podían quitar y robustez (v0.7.0)
+
+El 08/11/2026 se revisaron las siete integraciones propias (código, documentos
+y comportamiento en casa). En esta salieron dos fallos que podían estropear el
+balance y una lista de cosas a medio hacer. Todo lo de abajo tiene prueba en
+`tests/test_riego.py`; lo de la recarga se comprobó además con un Home
+Assistant 2026.11 real del venv (alta, recarga a mitad de ciclo y descarga).
+
+**1. Recargar con un ciclo en curso dejaba dos coordinadores vivos.**
+Cualquier cambio en Configurar recarga la entrada. `async_parar` cancelaba los
+temporizadores, pero no el ciclo que ya corría, que puede pasarse un minuto
+dormido entre zona y zona. El ciclo viejo seguía: publicaba en MQTT las zonas
+que le quedaban y guardaba su estado en el mismo almacén que el coordinador
+nuevo, que ya había cargado el suyo. El que guardara el último ganaba: déficit
+o litros duplicados o perdidos. Ahora:
+
+- El ciclo corre en su propia tarea (`entry.async_create_background_task`), y
+  `async_parar` la cancela y **espera** a que termine antes de guardar. La
+  descarga no sigue hasta entonces, así que el coordinador nuevo lee el estado
+  bueno.
+- El envío de cada zona y su apunte (déficit descontado, entrega pendiente,
+  último riego) van juntos en una tarea protegida: si la cancelación llega
+  justo mientras se publica, la orden puede haber salido ya, y entonces tiene
+  que quedar apuntada. `async_parar` espera también a esa tarea. La válvula no
+  se queda abierta: ejecuta la dosis por volumen y se cierra sola (§4.2).
+- Las zonas que quedaban por regar conservan su déficit, y el amanecer **no**
+  queda marcado como cumplido. Si al volver a arrancar aún es de noche, el
+  planificador repite el ciclo al minuto: lo ya regado tiene el déficit a cero
+  y no vuelve a regar, y la ET₀ del periodo es casi nula. Si ya ha amanecido,
+  se riega en el ciclo siguiente.
+- Un coordinador parado no vuelve a planificar ni a programar comprobaciones,
+  y las comprobaciones de entrega lanzadas por temporizador también se cancelan
+  (siguen apuntadas en el almacén; el coordinador nuevo las retoma).
+- Quien lanzó el ciclo con `riego.ejecutar_ciclo` recibe
+  `{"resultado": "cancelado"}`. Si a él lo cancelan (un script parado), el
+  ciclo sigue: es de la integración, no de quien lo pidió.
+
+**2. No se podía quitar un sensor opcional.** Home Assistant no manda la clave
+de un campo opcional vacío, y el flujo de opciones guardaba
+`{**opciones, **cambios}`: el sensor anterior seguía ahí. Era imposible quitar
+el viento, la presión, la lluvia, la previsión o la notificación. Ahora las
+claves `vol.Optional` del paso que no vengan se guardan como `None`, que tapa
+también el valor del alta (vive en `entry.data`). En las zonas no pasaba: se
+guarda la zona entera tal como llega.
+
+**Lo demás:**
+
+- **Previsión no disponible.** Con `weather.aemet` en `unavailable`, la llamada
+  a `get_forecasts` lanzaba y quedaba un WARNING con la traza entera (pasó el
+  08/11 a las 06:59). Ahora se mira antes el estado y se deja un aviso de una
+  línea; el ciclo sigue sin previsión, como dice §4.5.
+- **MQTT que falla.** `mqtt.async_publish` puede lanzar `HomeAssistantError`, y
+  cortaba el ciclo a medias. Ahora, si una zona no se puede enviar (o no tiene
+  topic), no se le descuenta el déficit ni se apunta la entrega, llega un aviso
+  por la notificación de la integración, la zona sale como `error_envio` en el
+  resumen y el ciclo sigue con las demás.
+- **Unidades.** Se leen de `unit_of_measurement` con los conversores de Home
+  Assistant (`SpeedConverter`, `PressureConverter`, `TemperatureConverter`).
+  Antes solo se convertía el viento en km/h, la presión se adivinaba («menos de
+  200 es kPa») y los °F no se comprobaban. Sin unidad declarada se mantiene lo
+  de antes: viento en km/h, temperatura en °C y la regla de la presión. Una
+  unidad desconocida deja un aviso y ese dato no se usa. La helada también usa
+  la temperatura convertida.
+- **Viento no disponible.** Contaba como 0 m/s sin decir nada. Ahora se trata
+  como sin anemómetro (manda el viento mínimo configurado, que es lo mismo que
+  daba 0 m/s) y queda un WARNING, una sola vez hasta que el sensor vuelve.
+- **Huecos de ET₀.** Los huecos de más de 3 h se siguen descartando, pero ahora
+  queda un WARNING con las horas perdidas: el déficit de ese periodo sale por
+  debajo y conviene saberlo.
+- **Guardado.** El tick de cada minuto escribía el almacén en disco cada minuto.
+  Ahora guarda con `async_delay_save` a 5 min, igual que el caudal aprendido y
+  la marca de caudal visto; los hitos del ciclo, los servicios y los
+  interruptores guardan en el acto, y al parar HA el almacén escribe lo
+  pendiente. Si HA se cae de golpe se pierden como mucho 5 min de ET₀
+  (centésimas de mm).
+- **Riego anterior aún abierto.** Si al enviar una zona su entrega anterior
+  seguía pendiente porque aún pasaba agua (un ciclo a mano, o el ciclo repetido
+  tras una recarga), la nueva la sobrescribía y esos litros no llegaban nunca a
+  la temporada. La orden nueva pone a 0 el volumen de la válvula y reemplaza el
+  programa en curso, así que ahora la entrega anterior se cierra justo antes con
+  lo que lleve: suma a la temporada y lo que no llegó a dar vuelve al déficit.
+  `riego.regar_zona` hace lo mismo.
+- **Doble resta de lluvia.** Con el sensor de 24 h, dos ciclos el mismo día
+  restaban dos veces la misma lluvia. Ahora se guarda lo que marcaba en el
+  ciclo y, si el anterior fue hace menos de 24 h, solo cuenta lo que haya subido
+  desde entonces. Como la ventana del sensor se desliza, puede quedarse algo
+  corto: peca de regar, no de dejar sin agua. El panel deja también de restar en
+  la proyección la lluvia ya descontada. Con el contador de lluvia no pasaba.
+- **Zonas borradas.** Al borrar una zona, sus entidades y su dispositivo se
+  quedaban en el registro («ya no las proporciona la integración») y su
+  déficit, litros y entrega pendiente, en el almacén. Ahora, al arrancar, se
+  retiran el dispositivo y las entidades de las zonas que ya no existen, y su
+  estado sale del almacén.
+- **Al estilo actual de HA.** Los servicios se registran en `async_setup` (con
+  `CONFIG_SCHEMA` de solo entradas), una vez, y no se quitan al descargar; el
+  coordinador va en `entry.runtime_data` en vez de `hass.data[DOMAIN]`; los
+  errores que ve el usuario son `ServiceValidationError` (zona desconocida,
+  integración sin cargar, zona sin topic); el manifest lleva
+  `single_config_entry: true` (se quita el aborto manual del flujo) e
+  `iot_class: local_push`, que es lo que es: todo llega por cambios de estado y
+  MQTT. `riego.ajustar_deficit` rechaza en el esquema lo que pase de ±50 mm,
+  como su selector.
+- **«ET₀ acumulada del periodo»** pasa de
+  `measurement` a `total` con `last_reset` en el último ciclo, que es lo que es:
+  un acumulado que el ciclo pone a cero. Home Assistant puede abrir un aviso de
+  estadísticas por el cambio de clase; se resuelve desde Herramientas para
+  desarrolladores → Estadísticas.
+- **Ciclo partido en funciones**: balance, motivos para no regar, riego de las
+  zonas y riego de una zona. Sin cambios de comportamiento aparte de los de
+  arriba.
+- **Documentación.** `en.json` tenía 13 descripciones de menos y 6 de más (entre
+  ellas la de la simulación en las opciones, que ya no existe); ahora las tres
+  traducciones tienen las mismas claves, las cinco descripciones que solo tenía
+  el inglés pasan también a `strings.json`/`es.json`, y la prueba de
+  traducciones compara todas las claves. El README pide HA 2026.9 (por
+  `via_device_id`, §7.9) y `hacs.json` también. Las pruebas de ET₀ cargan
+  `et0.py` sin pasar por el `__init__.py` del paquete, así que de verdad corren
+  con Python a secas. Se corrige el docstring del huso horario de `et0.py`: el
+  desfase es el de la hora de reloj, con el horario de verano incluido.

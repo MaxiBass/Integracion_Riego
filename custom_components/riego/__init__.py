@@ -11,15 +11,21 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, Z_ID
 from .entity import DISPOSITIVO_SISTEMA
 from .coordinator import RiegoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+type RiegoConfigEntry = ConfigEntry[RiegoCoordinator]
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -55,15 +61,23 @@ ESQUEMA_REGAR = vol.Schema(
 ESQUEMA_DEFICIT = vol.Schema(
     {
         vol.Required("zona"): cv.string,
-        vol.Required("valor"): vol.Coerce(float),
+        # Mismos límites que el selector de services.yaml
+        vol.Required("valor"): vol.All(vol.Coerce(float), vol.Range(min=-50, max=50)),
         vol.Optional("relativo", default=False): cv.boolean,
     }
 )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Registra los servicios una vez, con o sin entrada configurada."""
+    _registrar_servicios(hass)
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: RiegoConfigEntry) -> bool:
     """Configura una entrada de la integración."""
     _borrar_entidades_retiradas(hass, entry)
+    _borrar_zonas_eliminadas(hass, entry)
     coordinador = RiegoCoordinator(hass, entry)
     await coordinador.async_iniciar()
 
@@ -78,31 +92,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     coordinador.id_dispositivo_sistema = dispositivo.id
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinador
+    entry.runtime_data = coordinador
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     await _registrar_frontend(hass)
-    _registrar_servicios(hass)
 
     entry.async_on_unload(entry.add_update_listener(_al_actualizar_opciones))
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Descarga una entrada."""
+async def async_unload_entry(hass: HomeAssistant, entry: RiegoConfigEntry) -> bool:
+    """Descarga una entrada. También al recargarla tras un cambio en Configurar."""
     descargada = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if descargada:
-        coordinador: RiegoCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        await coordinador.async_parar()
-        if not hass.data[DOMAIN]:
-            for servicio in (
-                SERVICIO_EJECUTAR,
-                SERVICIO_REGAR,
-                SERVICIO_DEFICIT,
-                SERVICIO_SALTAR,
-                SERVICIO_TEMPORADA,
-            ):
-                hass.services.async_remove(DOMAIN, servicio)
+        # Cancela el ciclo en curso y espera a que suelte el almacén antes de
+        # que el coordinador de la recarga lo lea (§7.29).
+        await entry.runtime_data.async_parar()
     return descargada
 
 
@@ -115,6 +120,28 @@ def _borrar_entidades_retiradas(hass: HomeAssistant, entry: ConfigEntry) -> None
         ):
             _LOGGER.info("Se retira %s: ya no la publica la integración", entidad.entity_id)
             registro.async_remove(entidad.entity_id)
+
+
+def _borrar_zonas_eliminadas(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Quita del registro los dispositivos y entidades de las zonas borradas.
+
+    Borrar una zona en Configurar recarga la entrada; sin esto, sus entidades
+    se quedaban como «ya no las proporciona la integración».
+    """
+    opciones = {**entry.data, **entry.options}
+    vigentes = {f"zona_{z[Z_ID]}" for z in opciones.get("zonas", [])}
+    dispositivos = dr.async_get(hass)
+    entidades = er.async_get(hass)
+    for dispositivo in dr.async_entries_for_config_entry(dispositivos, entry.entry_id):
+        zonas = [i for d, i in dispositivo.identifiers if d == DOMAIN and i.startswith("zona_")]
+        if not zonas or zonas[0] in vigentes:
+            continue
+        for entidad in er.async_entries_for_device(
+            entidades, dispositivo.id, include_disabled_entities=True
+        ):
+            entidades.async_remove(entidad.entity_id)
+        _LOGGER.info("Se retira el dispositivo de la zona borrada %s", dispositivo.name)
+        dispositivos.async_remove_device(dispositivo.id)
 
 
 async def _al_actualizar_opciones(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -144,10 +171,10 @@ async def _registrar_frontend(hass: HomeAssistant) -> None:
 
 
 def _coordinador(hass: HomeAssistant) -> RiegoCoordinator:
-    datos = hass.data.get(DOMAIN) or {}
-    if not datos:
-        raise ValueError("La integración Riego no está configurada")
-    return next(iter(datos.values()))
+    entradas = hass.config_entries.async_loaded_entries(DOMAIN)
+    if not entradas:
+        raise ServiceValidationError("La integración Riego no está configurada o no ha cargado")
+    return entradas[0].runtime_data
 
 
 def _resolver_zona(coordinador: RiegoCoordinator, referencia: str) -> str:
@@ -158,13 +185,10 @@ def _resolver_zona(coordinador: RiegoCoordinator, referencia: str) -> str:
             return zona[Z_ID]
         if str(zona.get("nombre", "")).lower() == referencia_norm:
             return zona[Z_ID]
-    raise ValueError(f"Zona desconocida: {referencia}")
+    raise ServiceValidationError(f"Zona desconocida: {referencia}")
 
 
 def _registrar_servicios(hass: HomeAssistant) -> None:
-    if hass.services.has_service(DOMAIN, SERVICIO_EJECUTAR):
-        return
-
     async def ejecutar(call: ServiceCall) -> dict:
         coordinador = _coordinador(hass)
         return await coordinador.ejecutar_ciclo(call.data.get("simulacion"))

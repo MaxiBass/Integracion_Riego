@@ -25,7 +25,10 @@
           "sensor_presion": "The ABSOLUTE (station) pressure, not the sea-level-adjusted one. Leave empty to estimate it from the elevation configured in Home Assistant.",
           "sensor_iluminancia": "For sensors that only report lux. Note: if your lux entity is itself derived from radiation by a fixed factor, it is not an independent measurement.",
           "sensor_lluvia_24h": "Only used without a total counter, or for the first cycle after configuring one: its 24 h window does not match the period between cycles.",
-          "sensor_lluvia_total": "A counter that only goes up, such as the station's total or yearly rain. It measures rainfall exactly between one cycle and the next, like ET₀. Recommended."
+          "sensor_lluvia_total": "A counter that only goes up, such as the station's total or yearly rain. It measures rainfall exactly between one cycle and the next, like ET₀. Recommended.",
+          "factor_lux": "Lux to W/m² conversion. 126.7 is the Ecowitt value and the usual one for sunlight.",
+          "sensor_humedad": "Relative humidity in %, not absolute humidity in g/m³. On Ecowitt stations it is the 'humidity' field.",
+          "sensor_radiacion": "Set this one or the illuminance sensor. If you have both, this one takes priority."
         }
       },
       "prevision": {
@@ -45,7 +48,9 @@
         "data_description": {
           "lluvia_prevista_umbral": "Millimetres summed over the horizon. Some providers spread forecast rain at 0.1 mm/h, so this alone rarely defers.",
           "lluvia_probabilidad_umbral": "A forecast hour counts as likely rain when its probability reaches this value.",
-          "lluvia_horas_probables": "Defers if the horizon holds at least this many hours of likely rain. 0 disables this rule. With a daily forecast, each likely day counts as 24 h."
+          "lluvia_horas_probables": "Defers if the horizon holds at least this many hours of likely rain. 0 disables this rule. With a daily forecast, each likely day counts as 24 h.",
+          "lluvia_cap": "Maximum rain deducted in one cycle, so that a downpour does not zero the deficit for several days.",
+          "lluvia_minima": "Rain below this value is not deducted from the deficit: it does not reach the root zone."
         }
       },
       "ciclo": {
@@ -63,7 +68,8 @@
           "notify_entity": "Notification entity"
         },
         "data_description": {
-          "simulacion": "Strongly recommended on install: everything is computed and reported, but nothing is sent to the valves."
+          "simulacion": "Strongly recommended on install: everything is computed and reported, but nothing is sent to the valves.",
+          "desfase_zonas": "Time between opening one zone and the next. It does not wait for the previous one to finish: the valve runs its dose on its own."
         }
       },
       "zona": {
@@ -86,7 +92,9 @@
           "techo": "Absolute per-cycle limit. It must sit ABOVE the legitimate summer peak; if it clips routinely it is rationing, not protecting.",
           "factor": "Multiplies ETc before converting to litres. For localized irrigation and controlled deficit irrigation. 1.0 = full FAO-56 dose.",
           "sensor_caudal": "Tells the integration whether the zone is watering and, with the volume, lets it check what was actually delivered.",
-          "sensor_volumen_real": "Litres the valve counts in each run. With the flow, the integration checks what was actually delivered and returns any shortfall to the deficit; with the duration, it learns the zone's real flow rate."
+          "sensor_volumen_real": "Litres the valve counts in each run. With the flow, the integration checks what was actually delivered and returns any shortfall to the deficit; with the duration, it learns the zone's real flow rate.",
+          "topic": "For example zigbee2mqtt/Garden valve/set",
+          "umbral": "Deficit in millimetres that triggers irrigation. With drip irrigation a low value is usual and correct (daily irrigation, small dose)."
         }
       },
       "otra": {
@@ -143,7 +151,10 @@
           "sensor_presion": "The ABSOLUTE (station) pressure, not the sea-level-adjusted one. Leave empty to estimate it from the elevation configured in Home Assistant.",
           "sensor_iluminancia": "For sensors that only report lux. Note: if your lux entity is itself derived from radiation by a fixed factor, it is not an independent measurement.",
           "sensor_lluvia_24h": "Only used without a total counter, or for the first cycle after configuring one: its 24 h window does not match the period between cycles.",
-          "sensor_lluvia_total": "A counter that only goes up, such as the station's total or yearly rain. It measures rainfall exactly between one cycle and the next, like ET₀. Recommended."
+          "sensor_lluvia_total": "A counter that only goes up, such as the station's total or yearly rain. It measures rainfall exactly between one cycle and the next, like ET₀. Recommended.",
+          "factor_lux": "Lux to W/m² conversion. 126.7 is the Ecowitt value and the usual one for sunlight.",
+          "sensor_humedad": "Relative humidity in %, not absolute humidity in g/m³. On Ecowitt stations it is the 'humidity' field.",
+          "sensor_radiacion": "Set this one or the illuminance sensor. If you have both, this one takes priority."
         }
       },
       "prevision": {
@@ -162,7 +173,9 @@
         "data_description": {
           "lluvia_prevista_umbral": "Millimetres summed over the horizon. Some providers spread forecast rain at 0.1 mm/h, so this alone rarely defers.",
           "lluvia_probabilidad_umbral": "A forecast hour counts as likely rain when its probability reaches this value.",
-          "lluvia_horas_probables": "Defers if the horizon holds at least this many hours of likely rain. 0 disables this rule. With a daily forecast, each likely day counts as 24 h."
+          "lluvia_horas_probables": "Defers if the horizon holds at least this many hours of likely rain. 0 disables this rule. With a daily forecast, each likely day counts as 24 h.",
+          "lluvia_cap": "Maximum rain deducted in one cycle, so that a downpour does not zero the deficit for several days.",
+          "lluvia_minima": "Rain below this value is not deducted from the deficit: it does not reach the root zone."
         }
       },
       "ciclo": {
@@ -177,9 +190,7 @@
           "deficit_maximo": "Maximum accumulated deficit",
           "notify_entity": "Notification entity"
         },
-        "data_description": {
-          "simulacion": "Strongly recommended on install: everything is computed and reported, but nothing is sent to the valves."
-        }
+        "data_description": {}
       },
       "zonas": {
         "title": "Zones",
