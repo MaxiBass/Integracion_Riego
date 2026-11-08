@@ -13,11 +13,10 @@ da 404 incluso con GitHub autenticado).
 - El HA real está montado por Samba en el Mac:
   - `/Volumes/config/custom_components/riego` → donde HACS instala
     finalmente la integración
-- Desde el 13/10/2026 hay **GitHub CLI** (`gh`, sesión de MaxiBass con permiso
-  `repo`). Claude Code puede hacer push **cuando Maxi lo pida**, sin tocar la
-  configuración global de git:
-  `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin main`.
-  Antes, revisar que el diff no lleve datos personales: el repo es público.
+- Esta sesión puede hacer `git push` directamente (credenciales de `gh`, cuenta
+  MaxiBass, desde el 13/10/2026; Maxi confirmó el push directo el 08/11/2026);
+  el flujo y las reglas están en `~/.claude/CLAUDE.md`. Antes, revisar que el
+  diff no lleve datos personales: el repo es público.
 - **HACS sigue commits, no versiones** (el repo no publica releases): cada
   push aparece como actualización. Para instalar sin pasar por la interfaz,
   `update.install` sobre `update.riego_por_balance_hidrico_update` con
@@ -114,7 +113,7 @@ Frutales, 24 h después de un riego). Ver §4.3.
 ## Flujo para editar la integración
 
 1. Editar los archivos **en el repo**, dentro de `custom_components/riego/`.
-2. Commit en el repo. Push: Maxi, o Claude Code con `gh` si se lo pide.
+2. Commit y push (revisando antes el diff, ver `~/.claude/CLAUDE.md`).
 3. Subir el número de `version` en `manifest.json` cuando el cambio esté
    listo para probarse. HACS no lo usa para detectar la actualización (sigue
    commits, ver «Entorno»), pero es lo que dice qué versión hay instalada.
