@@ -1258,6 +1258,50 @@ def _coordinador() -> None:
     c.runtime("frutales")["habilitada"] = False
     comprobar(c.volumen_objetivo("frutales") == 0, "zona deshabilitada → 0 L")
 
+    # 20. Reserva de suelo (§7.30): tras una lluvia grande el déficit baja de 0
+    # hasta -reserva, y los días siguientes la ET₀ se cubre con esa agua en vez
+    # de regar. Sin reserva (Aptenia) todo sigue como antes: se recorta a 0.
+    c, hass = construir(zonas=[{**ZONAS[0], "reserva": 10.0}, ZONAS[1]])
+    c._estado["et0_acumulada"] = 2.0
+    hass.states.set("sensor.lluvia", 13.0)
+    publicados.clear()
+    with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish), \
+         patch.object(mod, "get_astral_event_next",
+                      return_value=datetime(2026, 9, 14, 5, 50, tzinfo=timezone.utc)):
+        asyncio.run(c.ejecutar_ciclo())
+    comprobar(not publicados, "con 13 mm de lluvia no riega ninguna zona")
+    comprobar(casi(c.deficit("frutales"), -10.0, 0.01),
+              f"Frutales guarda la reserva: {c.deficit('frutales')} mm (esperado -10: 1.42 - 13 recortado)")
+    comprobar(casi(c.deficit("aptenia"), 0.0, 0.01),
+              f"Aptenia, sin reserva, se queda en 0 como antes ({c.deficit('aptenia')} mm)")
+    comprobar(c.volumen_objetivo("frutales") == 0 and c.volumen_objetivo("aptenia") == 0,
+              "con el suelo lleno no hay volumen objetivo")
+    comprobar(c._deficit_proyectado("frutales") == -10.0 and c._deficit_proyectado("aptenia") == 0.0,
+              "la proyección respeta el mismo suelo que el balance")
+    # Al día siguiente, 3 mm de ET₀ (2.13 mm de ETc) salen de la reserva: sin riego.
+    hass.states.set("sensor.lluvia", 0.0)
+    c._estado["et0_acumulada"] = 3.0
+    publicados.clear()
+    with patch.object(mod.mqtt, "async_publish", side_effect=fake_publish), \
+         patch.object(mod, "get_astral_event_next",
+                      return_value=datetime(2026, 9, 15, 5, 50, tzinfo=timezone.utc)):
+        asyncio.run(c.ejecutar_ciclo())
+    comprobar([t for t, _ in publicados] == ["z2m/Aptenia/set"],
+              f"solo riega Aptenia, que no tiene reserva: {[t for t, _ in publicados]}")
+    comprobar(casi(c.deficit("frutales"), -7.87, 0.01),
+              f"la ETc de Frutales sale de la reserva sin regar: {c.deficit('frutales')} mm (esperado -7.87)")
+    aptenia = next(p for t, p in publicados if "Aptenia" in t)
+    comprobar(aptenia["cyclic_quantitative_irrigation"]["irrigation_capacity"] == 132
+              and casi(c.deficit("aptenia"), 0.0, 0.01),
+              "Aptenia riega sus 3 × 0.55 × 80 = 132 L y vuelve a 0, como siempre")
+    # ajustar_deficit respeta el mismo suelo: ni por debajo de -reserva ni de 0 sin ella
+    asyncio.run(c.ajustar_deficit("frutales", -50.0, False))
+    asyncio.run(c.ajustar_deficit("aptenia", -5.0, False))
+    comprobar(casi(c.deficit("frutales"), -10.0, 0.01) and casi(c.deficit("aptenia"), 0.0, 0.01),
+              f"ajustar_deficit se acota a -reserva / 0: {c.deficit('frutales')} / {c.deficit('aptenia')}")
+    comprobar(c.reserva("frutales") == 10.0 and c.reserva("aptenia") == 0.0,
+              "la reserva se lee de la zona y vale 0 si no está configurada")
+
 
 def test_entidades_retiradas() -> None:
     """Las entidades retiradas se borran del registro al arrancar.

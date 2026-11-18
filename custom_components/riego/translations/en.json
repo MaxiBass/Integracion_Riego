@@ -81,6 +81,7 @@
           "umbral": "Irrigation threshold",
           "techo": "Safety cap",
           "factor": "Adjustment coefficient",
+          "reserva": "Soil reserve",
           "kc": "Monthly Kc (12 comma-separated values)",
           "topic": "Valve MQTT topic",
           "caudal_defecto": "Initial flow estimate",
@@ -91,6 +92,7 @@
         "data_description": {
           "techo": "Absolute per-cycle limit. It must sit ABOVE the legitimate summer peak; if it clips routinely it is rationing, not protecting.",
           "factor": "Multiplies ETc before converting to litres. For localized irrigation and controlled deficit irrigation. 1.0 = full FAO-56 dose.",
+          "reserva": "Rain the soil can hold beyond the deficit, in mm. After rain the deficit may drop to minus this value, and the following days' ET₀ is covered by that water instead of irrigating. 0 = excess rain is discarded.",
           "sensor_caudal": "Tells the integration whether the zone is watering and, with the volume, lets it check what was actually delivered.",
           "sensor_volumen_real": "Litres the valve counts in each run. With the flow, the integration checks what was actually delivered and returns any shortfall to the deficit; with the duration, it learns the zone's real flow rate.",
           "topic": "For example zigbee2mqtt/Garden valve/set",
@@ -207,6 +209,7 @@
           "umbral": "Irrigation threshold",
           "techo": "Safety cap",
           "factor": "Adjustment coefficient",
+          "reserva": "Soil reserve",
           "kc": "Monthly Kc (12 comma-separated values)",
           "topic": "Valve MQTT topic",
           "caudal_defecto": "Initial flow estimate",
@@ -218,6 +221,7 @@
         "data_description": {
           "techo": "Absolute per-cycle limit. It must sit ABOVE the legitimate summer peak; if it clips routinely it is rationing, not protecting.",
           "factor": "Multiplies ETc before converting to litres. For localized irrigation and controlled deficit irrigation. 1.0 = full FAO-56 dose.",
+          "reserva": "Rain the soil can hold beyond the deficit, in mm. After rain the deficit may drop to minus this value, and the following days' ET₀ is covered by that water instead of irrigating. 0 = excess rain is discarded.",
           "sensor_caudal": "Tells the integration whether the zone is watering and, with the volume, lets it check what was actually delivered.",
           "sensor_volumen_real": "Litres the valve counts in each run. With the flow, the integration checks what was actually delivered and returns any shortfall to the deficit; with the duration, it learns the zone's real flow rate."
         }

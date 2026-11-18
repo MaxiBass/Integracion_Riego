@@ -110,6 +110,11 @@ suya y no técnica. Queda por revisar en abril/mayo de 2027 con una temporada
 completa, y por comprobar con pala (25–30 cm en el borde del bulbo húmedo de
 Frutales, 24 h después de un riego). Ver §4.3.
 
+Desde v0.8.0 cada zona tiene una **reserva de suelo** (mm, en Configurar; 0
+por defecto): el déficit puede bajar hasta `-reserva` tras una lluvia y la ET₀
+de los días siguientes se cubre con esa agua. Todo recorte del déficit pasa
+por `_acotar_deficit`; no vuelvas a poner un `max(..., 0.0)` suelto. Ver §7.30.
+
 ## Flujo para editar la integración
 
 1. Editar los archivos **en el repo**, dentro de `custom_components/riego/`.

@@ -82,6 +82,7 @@ from .const import (
     DEFECTO_MARGEN_DURACION,
     DEFECTO_OFFSET_AMANECER,
     DEFECTO_PROBABILIDAD_PREVISTA,
+    DEFECTO_RESERVA,
     DEFECTO_TECHO,
     DEFECTO_TEMP_HELADA,
     DEFECTO_UMBRAL,
@@ -112,6 +113,7 @@ from .const import (
     Z_KC,
     Z_M2,
     Z_NOMBRE,
+    Z_RESERVA,
     Z_SENSOR_CAUDAL,
     Z_SENSOR_DURACION,
     Z_SENSOR_VOLUMEN,
@@ -781,6 +783,15 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def deficit(self, zid: str) -> float:
         return float(self.runtime(zid).get("deficit", 0.0))
 
+    def reserva(self, zid: str) -> float:
+        """Lluvia que el suelo guarda por encima del déficit, en mm (§7.30)."""
+        return max(float(self.valor_zona(zid, Z_RESERVA, DEFECTO_RESERVA)), 0.0)
+
+    def _acotar_deficit(self, zid: str, valor: float) -> float:
+        """Entre -reserva (suelo lleno tras la lluvia) y el déficit máximo."""
+        maximo = float(self._opt(CONF_DEFICIT_MAXIMO, DEFECTO_DEFICIT_MAXIMO))
+        return round(min(max(valor, -self.reserva(zid)), maximo), 2)
+
     def volumen_objetivo(self, zid: str, deficit: float | None = None) -> int:
         """Litros a enviar a la zona, 0 si no toca regar."""
         if not self.habilitada(zid):
@@ -795,14 +806,13 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _deficit_proyectado(self, zid: str) -> float:
         """Déficit estimado en el momento del ciclo, para planificar la hora."""
-        maximo = float(self._opt(CONF_DEFICIT_MAXIMO, DEFECTO_DEFICIT_MAXIMO))
         factor = float(self.valor_zona(zid, Z_FACTOR, DEFECTO_FACTOR_ZONA))
         bruto = (
             self.deficit(zid)
             + self._estado["et0_acumulada"] * self.kc(zid) * factor
             - self._lluvia_efectiva()
         )
-        return min(max(bruto, 0.0), maximo)
+        return self._acotar_deficit(zid, bruto)
 
     def duracion_estimada(self, zid: str, litros: int | None = None) -> timedelta:
         vol = self.volumen_objetivo(zid) if litros is None else litros
@@ -1025,13 +1035,12 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         et0_periodo = float(self._estado["et0_acumulada"])
         lluvia_bruta, fuente_lluvia = self._lluvia_periodo()
         lluvia = self._lluvia_efectiva()
-        maximo = float(self._opt(CONF_DEFICIT_MAXIMO, DEFECTO_DEFICIT_MAXIMO))
 
         for z in self.zonas:
             zid = z[Z_ID]
             factor = float(self.valor_zona(zid, Z_FACTOR, DEFECTO_FACTOR_ZONA))
             nuevo = self.deficit(zid) + et0_periodo * self.kc(zid) * factor - lluvia
-            self.runtime(zid)["deficit"] = round(min(max(nuevo, 0.0), maximo), 2)
+            self.runtime(zid)["deficit"] = self._acotar_deficit(zid, nuevo)
             self.runtime(zid)["litros_hoy"] = 0.0
 
         # Lo que marca el sensor de 24 h ya está descontado: un segundo ciclo
@@ -1211,7 +1220,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         comprobada = not simulacion and self._registrar_entrega(
             zid, litros, m2, rt.get("ultimo_riego")
         )
-        rt["deficit"] = round(max(self.deficit(zid) - litros / max(m2, 1.0), 0.0), 2)
+        rt["deficit"] = self._acotar_deficit(zid, self.deficit(zid) - litros / max(m2, 1.0))
         rt["litros_hoy"] = float(litros)
         if not comprobada:
             # Si se va a comprobar, se suma al terminar lo que de verdad llegó.
@@ -1384,8 +1393,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         tolerancia = max(pedidos * TOLERANCIA_ENTREGA_PCT, TOLERANCIA_ENTREGA_L)
         if falta > tolerancia:
             devuelto = falta / max(float(entrega["m2"]), 1.0)
-            maximo = float(self._opt(CONF_DEFICIT_MAXIMO, DEFECTO_DEFICIT_MAXIMO))
-            rt["deficit"] = round(min(self.deficit(zid) + devuelto, maximo), 2)
+            rt["deficit"] = self._acotar_deficit(zid, self.deficit(zid) + devuelto)
             rt["litros_hoy"] = entregados
             if entregados <= tolerancia:
                 rt["ultimo_riego"] = entrega.get("ultimo_riego_previo")
@@ -1458,10 +1466,9 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_refresh()
 
     async def ajustar_deficit(self, zid: str, valor: float, relativo: bool) -> None:
-        maximo = float(self._opt(CONF_DEFICIT_MAXIMO, DEFECTO_DEFICIT_MAXIMO))
         actual = self.deficit(zid)
         nuevo = actual + valor if relativo else valor
-        self.runtime(zid)["deficit"] = round(min(max(nuevo, 0.0), maximo), 2)
+        self.runtime(zid)["deficit"] = self._acotar_deficit(zid, nuevo)
         await self._guardar()
         await self.async_refresh()
         self._planificar()
@@ -1527,6 +1534,7 @@ class RiegoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "m2": float(self.valor_zona(zid, Z_M2, DEFECTO_M2)),
                 "techo": float(self.valor_zona(zid, Z_TECHO, DEFECTO_TECHO)),
                 "factor": float(self.valor_zona(zid, Z_FACTOR, DEFECTO_FACTOR_ZONA)),
+                "reserva": self.reserva(zid),
                 "habilitada": self.habilitada(zid),
                 "estado": estado,
                 "caudal": self.caudal(zid),

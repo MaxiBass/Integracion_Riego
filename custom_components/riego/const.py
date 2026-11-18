@@ -76,6 +76,7 @@ Z_SENSOR_VOLUMEN: Final = "sensor_volumen_real"
 Z_SENSOR_DURACION: Final = "sensor_duracion_real"
 Z_CAUDAL_DEFECTO: Final = "caudal_defecto"
 Z_FACTOR: Final = "factor"
+Z_RESERVA: Final = "reserva"
 
 # ── Valores por defecto ───────────────────────────────────────────────
 # viento_minimo: FAO-56 recomienda acotar u2 a 0,5 m/s para que el término
@@ -123,6 +124,11 @@ DEFECTO_TECHO: Final = 800.0
 # litros. Sirve para riego localizado (solo se moja una fracción del suelo)
 # y para riego deficitario controlado. 1,0 = dosis FAO-56 íntegra.
 DEFECTO_FACTOR_ZONA: Final = 1.0
+# Reserva de suelo por zona, en mm: la lluvia que el suelo guarda por encima
+# del déficit. Con ella el déficit puede bajar hasta -reserva tras una lluvia
+# y la ET₀ de los días siguientes se cubre con esa agua en vez de regar
+# (§7.30 en DECISIONES.md). 0 = el exceso de lluvia se pierde (lo de antes).
+DEFECTO_RESERVA: Final = 0.0
 
 # ── Comprobación de lo que riega cada válvula (§7.28 en DECISIONES.md) ──
 # La integración no bloquea el riego por el estado de la válvula: si falta

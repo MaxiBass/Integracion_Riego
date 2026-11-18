@@ -17,6 +17,10 @@ Historial de decisiones, hallazgos de la revisión y plan de migración:
   Con un contador de lluvia total, la lluvia se mide exactamente entre un
   ciclo y el siguiente, igual que la ET₀; sin él, se usa la de las últimas
   24 h.
+- **Reserva de suelo** por zona (opcional): la lluvia que sobra tras cubrir
+  el déficit no se pierde, sino que lo deja en negativo hasta esa reserva, y
+  los días siguientes la ET₀ sale de ahí antes de volver a regar. A 0 (por
+  defecto) el déficit nunca baja de 0.
 - **Dosis volumétrica**: `litros = déficit × m²`, acotada por el techo de
   seguridad de la zona.
 - **Hora de inicio calculada hacia atrás desde el amanecer**, estimando la
@@ -76,7 +80,7 @@ Si prefieres un panel fijo que puedas editar a mano, no uses la estrategia y
 monta las tarjetas tú: una vista de tipo `sections`, una sección por zona con
 tiles de las entidades y los `switch` con `toggle`. Los ajustes de cada zona
 están en los atributos del sensor de déficit (`superficie_m2`, `umbral_mm`,
-`techo_l`, `factor_zona`, `kc_mes`).
+`techo_l`, `factor_zona`, `reserva_mm`, `kc_mes`).
 
 ## Servicios
 

@@ -183,7 +183,7 @@ for (const zid of Object.keys(ZONAS)) {
   assert.ok(ajustes, `faltan los ajustes de ${zid} en el Detalle`);
   // join(): el array viene del contexto vm y deepEqual compara prototipos.
   const atributos = ajustes.entities.map((e) => e.type === "attribute" && e.attribute).join(",");
-  assert.equal(atributos, "superficie_m2,umbral_mm,techo_l,factor_zona", `ajustes de ${zid}`);
+  assert.equal(atributos, "superficie_m2,umbral_mm,techo_l,factor_zona,reserva_mm", `ajustes de ${zid}`);
 }
 
 // 3b. «Saltar el próximo riego» sí es un mando: toggle en Resumen y Detalle.

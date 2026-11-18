@@ -106,6 +106,7 @@ SENSORES_ZONA: tuple[DescripcionSensor, ...] = (
             "umbral_mm": z.get("umbral"),
             "kc_mes": z.get("kc"),
             "factor_zona": z.get("factor"),
+            "reserva_mm": z.get("reserva"),
             "superficie_m2": z.get("m2"),
             "techo_l": z.get("techo"),
             "volumen_equivalente_l": round(z.get("deficit", 0) * z.get("m2", 0)),

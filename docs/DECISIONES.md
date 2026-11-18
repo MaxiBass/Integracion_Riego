@@ -1539,3 +1539,67 @@ guarda la zona entera tal como llega.
   `et0.py` sin pasar por el `__init__.py` del paquete, así que de verdad corren
   con Python a secas. Se corrige el docstring del huso horario de `et0.py`: el
   desfase es el de la hora de reloj, con el horario de verano incluido.
+
+
+### 7.30 Reserva de suelo: la lluvia que sobra ya no se pierde (v0.8.0)
+
+**Fecha:** 18/11/2026. Revisión del primer mes de otoño con el riego real
+(19/10–18/11), hecha con las estadísticas de HA.
+
+**Qué se vio.** El sistema funcionaba como debía: la ET₀ por ciclo cuadraba
+con la climatología de Alicante (2,5 mm/día del 21 al 31 de octubre; 1,74 del
+1 al 18 de noviembre), cada dosis era exactamente ET₀ × Kc × superficie,
+pedido y entregado coincidían al litro y los tres aplazamientos por previsión
+(19/10, 02/11 y 11/11) acertaron. Pero el 20/10 cayeron 13 mm de madrugada, el
+ciclo de ese día no regó (bien) y **el del 21/10 regó 305 L en Frutales**
+(2,18 mm, la ETc del día) como si el suelo no guardara nada. Lo mismo tras los
+8 mm del 03–04/11: un solo ciclo sin regar y al siguiente, la dosis entera.
+
+El motivo es el recorte del déficit a 0 en `_aplicar_balance`: la lluvia
+cubre el déficit que hay y el resto se tira. De los 28 mm que llovieron en el
+mes, el balance aprovechó unos 5. FAO-56 (cap. 8) modela el balance con el
+agotamiento de la zona radicular `Dr ≥ 0`, pero el agua que entra por encima
+de la capacidad de campo es percolación; lo que entra **por debajo** se queda
+en el suelo y la planta la usa los días siguientes. Con el déficit siempre
+cerca de 0 (umbral 0,5 mm, riego diario) la zona radicular está casi llena
+todo el tiempo y una lluvia de 13 mm sí percola en parte, pero no entera: un
+frutal con raíces a 50–60 cm en un suelo franco tiene 40–50 mm de agua
+fácilmente aprovechable.
+
+**Decisión (Maxi, 18/11/2026):** cada zona tiene una **reserva de suelo** en
+mm, en Configurar. El déficit puede bajar hasta `-reserva`; por debajo, la
+lluvia se pierde como hasta ahora. Los días siguientes la ET₀ sube el déficit
+desde ahí y no se riega hasta que vuelve a superar el umbral. Con la reserva a
+0 (valor por defecto, y el de las zonas existentes mientras no se toque) el
+comportamiento es idéntico al anterior.
+
+**Cómo está hecho.**
+
+- `Z_RESERVA` (`reserva`, mm, 0–50) en el formulario de zona, junto al
+  coeficiente; `DEFECTO_RESERVA = 0`.
+- Todo recorte del déficit pasa por `_acotar_deficit(zid, valor)`: entre
+  `-reserva` y el déficit máximo. Lo usan el balance, la proyección que
+  planifica la hora, el descuento al regar, la devolución de lo que la
+  válvula no dio y `riego.ajustar_deficit` (que antes tampoco dejaba bajar
+  de 0).
+- El sensor de déficit publica `reserva_mm` junto a los demás ajustes; con
+  reserva el estado puede ser negativo, y `falta_para_regar` lo refleja.
+- Panel (estrategia): fila «Reserva de suelo» en los ajustes; la proyección
+  en vivo recorta a `-reserva` en vez de a 0 y, cosa que antes no hacía,
+  **solo cuenta litros si la proyección llega al umbral** (antes anunciaba
+  «42 L previstos» con 0,3 mm de déficit, que el ciclo no iba a regar). En
+  el Detalle, «🪣 el suelo aún guarda X mm de lluvia» mientras el déficit es
+  negativo. El panel fijo `riego-balance` de casa es una copia (§7.25) y se
+  retoca aparte.
+- Prueba 20 del coordinador: 13 mm de lluvia dejan Frutales (reserva 10) en
+  −10 mm y Aptenia (sin reserva) en 0; al día siguiente, con 3 mm de ET₀,
+  Frutales no riega y queda en −7,87 mm mientras Aptenia riega sus 132 L.
+
+**Qué falta decidir:** el valor de la reserva de cada zona, que es agronómico
+y es de Maxi. A 18/11 las tres zonas siguen a 0. Orientación: la reserva no
+debería pasar del agua fácilmente aprovechable de la zona radicular (frutal
+50–60 cm, 40–50 mm; tapizante 15–20 cm, 10–15 mm; seto 40–50 cm, 30–40 mm) y
+conviene empezar por una fracción: 10–15 mm en Frutales, 5 mm en Aptenia y
+8–10 mm en Cipreses. La lluvia efectiva sigue capada a 20 mm por ciclo
+(`lluvia_cap`), así que una reserva mayor que eso no se llenaría nunca de una
+vez.

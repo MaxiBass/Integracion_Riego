@@ -52,6 +52,7 @@ const AJUSTES_ZONA = [
   ["umbral_mm", "Umbral de riego", " mm"],
   ["techo_l", "Techo de seguridad", " L"],
   ["factor_zona", "Coeficiente de ajuste", ""],
+  ["reserva_mm", "Reserva de suelo", " mm"],
 ];
 
 /** Entidades de la integración, agrupadas por dispositivo. */
@@ -154,10 +155,12 @@ function plantillaResumen(zonas) {
 {%- set d = states(def) | float(0) -%}
 {%- set kc = state_attr(def, 'kc_mes') | float(0) -%}
 {%- set factor = state_attr(def, 'factor_zona') | float(1) -%}
-{%- set proy_mm = [d + et0p * kc * factor - lluvia, 0] | max -%}
+{%- set reserva = state_attr(def, 'reserva_mm') | float(0) -%}
+{%- set umbral = state_attr(def, 'umbral_mm') | float(0.5) -%}
+{%- set proy_mm = [d + et0p * kc * factor - lluvia, -reserva] | max -%}
 {%- set m2 = state_attr(def, 'superficie_m2') | float(0) -%}
 {%- set techo = state_attr(def, 'techo_l') | float(1000) -%}
-{%- set proy_l = [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
+{%- set proy_l = 0 if proy_mm < umbral else [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
 {%- set ns.total = ns.total + proy_l -%}
 {%- endfor -%}
 {% if is_state('SWITCH_SIM','on') %}### 🧪 Modo simulación activo
@@ -180,10 +183,12 @@ El déficit se está acumulando para el próximo ciclo.
 {%- set d = states(def) | float(0) -%}
 {%- set kc = state_attr(def, 'kc_mes') | float(0) -%}
 {%- set factor = state_attr(def, 'factor_zona') | float(1) -%}
-{%- set proy_mm = [d + et0p * kc * factor - lluvia, 0] | max -%}
+{%- set reserva = state_attr(def, 'reserva_mm') | float(0) -%}
+{%- set umbral = state_attr(def, 'umbral_mm') | float(0.5) -%}
+{%- set proy_mm = [d + et0p * kc * factor - lluvia, -reserva] | max -%}
 {%- set m2 = state_attr(def, 'superficie_m2') | float(0) -%}
 {%- set techo = state_attr(def, 'techo_l') | float(1000) -%}
-{%- set proy_l = [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
+{%- set proy_l = 0 if proy_mm < umbral else [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
 | {{ nom }} | {{ states(est) }} | {{ proy_mm | round(2) }} mm | {{ proy_l }} L |
 {% endfor -%}
 | **Total** | | | **{{ ns.total }} L** |
@@ -260,13 +265,14 @@ function plantillaPrevisto(zonas, sensorEt0Acum, sensorLluvia) {
 {%- set umbral = state_attr(defi, 'umbral_mm') | float(0.5) -%}
 {%- set m2 = state_attr(defi, 'superficie_m2') | float(0) -%}
 {%- set techo = state_attr(defi, 'techo_l') | float(1000) -%}
-{%- set proy_mm = [d + et0p * kc * factor - lluvia, 0] | max -%}
-{%- set proy_l = [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
+{%- set reserva = state_attr(defi, 'reserva_mm') | float(0) -%}
+{%- set proy_mm = [d + et0p * kc * factor - lluvia, -reserva] | max -%}
+{%- set proy_l = 0 if proy_mm < umbral else [(proy_mm * m2) | round(0) | int, techo | round(0) | int] | min -%}
 {%- set pct = [(proy_l / [techo, 1] | max * 100) | round(0) | int, 100] | min -%}
 {%- set llenos = (pct / 10) | round(0, 'floor') | int -%}
 **💧 {{ nom }}** — {{ proy_mm | round(2) }} mm → **{{ proy_l }} L** de {{ techo | round | int }}
 \`{{ '█' * llenos }}{{ '░' * (10 - llenos) }}\` {{ pct }} %
-{% if d >= umbral %}✅ ya supera su umbral, regará en el próximo ciclo{% endif %}
+{% if d >= umbral %}✅ ya supera su umbral, regará en el próximo ciclo{% elif proy_mm < 0 %}🪣 el suelo aún guarda {{ (-proy_mm) | round(2) }} mm de lluvia{% endif %}
 
 {% endfor %}`;
 }

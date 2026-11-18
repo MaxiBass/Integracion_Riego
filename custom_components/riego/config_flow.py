@@ -67,6 +67,7 @@ from .const import (
     DEFECTO_MARGEN_DURACION,
     DEFECTO_OFFSET_AMANECER,
     DEFECTO_PROBABILIDAD_PREVISTA,
+    DEFECTO_RESERVA,
     DEFECTO_TECHO,
     DEFECTO_TEMP_HELADA,
     DEFECTO_UMBRAL,
@@ -83,6 +84,7 @@ from .const import (
     Z_KC,
     Z_M2,
     Z_NOMBRE,
+    Z_RESERVA,
     Z_SENSOR_CAUDAL,
     Z_SENSOR_DURACION,
     Z_SENSOR_VOLUMEN,
@@ -268,6 +270,9 @@ def esquema_zona(valores: dict[str, Any]) -> vol.Schema:
             ),
             vol.Required(Z_FACTOR, default=valores.get(Z_FACTOR, DEFECTO_FACTOR_ZONA)): _numero(
                 0.1, 2.0, 0.05
+            ),
+            vol.Required(Z_RESERVA, default=valores.get(Z_RESERVA, DEFECTO_RESERVA)): _numero(
+                0, 50, 0.5, "mm"
             ),
             vol.Required(Z_KC, default=", ".join(str(v) for v in kc)): selector.TextSelector(),
             vol.Required(Z_TOPIC, default=valores.get(Z_TOPIC, "")): selector.TextSelector(),
