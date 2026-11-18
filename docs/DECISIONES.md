@@ -1595,9 +1595,22 @@ comportamiento es idéntico al anterior.
   −10 mm y Aptenia (sin reserva) en 0; al día siguiente, con 3 mm de ET₀,
   Frutales no riega y queda en −7,87 mm mientras Aptenia riega sus 132 L.
 
-**Qué falta decidir:** el valor de la reserva de cada zona, que es agronómico
-y es de Maxi. A 18/11 las tres zonas siguen a 0. Orientación: la reserva no
-debería pasar del agua fácilmente aprovechable de la zona radicular (frutal
+**Valores puestos el 18/11/2026 a las 23:38** (decisión de Maxi, por la API
+de opciones desde su navegador, tras reiniciar HA con la 0.8.0 cargada):
+
+| Zona | Umbral (antes 0,5) | Reserva | En noviembre | En verano |
+|---|---|---|---|---|
+| Frutales | 3 mm | 10 mm | ~420 L cada 3–4 días | a diario, ~500 L |
+| Aptenia | 2 mm | 5 mm | ~160 L cada 3 días | a diario, ~260 L |
+| Cipreses | 4 mm | 8 mm | ~180 L cada 6 días | ~210 L cada 2 días |
+
+El umbral también sube: en mm de déficit, un umbral fijo riega a diario en
+verano y espacia los riegos solo cuando la ETc baja, que es lo que se quería
+(riego más hondo y menos frecuente en otoño e invierno sin tocar nada en
+julio). El primer ciclo con los valores nuevos es el del 19/11; con el déficit
+a 0 y ~0,9 mm/día de ETc, Frutales regará hacia el 22/11, Aptenia hacia el
+21/11 y Cipreses hacia el 24/11, salvo lluvia. Orientación que se usó: la
+reserva no debería pasar del agua fácilmente aprovechable de la zona radicular (frutal
 50–60 cm, 40–50 mm; tapizante 15–20 cm, 10–15 mm; seto 40–50 cm, 30–40 mm) y
 conviene empezar por una fracción: 10–15 mm en Frutales, 5 mm en Aptenia y
 8–10 mm en Cipreses. La lluvia efectiva sigue capada a 20 mm por ciclo
